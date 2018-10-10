@@ -82,7 +82,7 @@ fi
 ##############################################
 
 
-#颜色提示
+# 颜色提示
 function warn()
 {
     msg="warning"
@@ -196,7 +196,7 @@ function get_ip_pair_list()
 }
 
 
-#陪练机ip，1V8用，IPV4/IPV6通用
+# 陪练机ip，1V8用，IPV4/IPV6通用
 function read_flavor_peilian_ip()
 {
     echo -e "\nread peilian client ip...\c"
@@ -278,22 +278,6 @@ function start_C1000k_server()
 }
 
 
-# 单机测试：启动一个netserver,IPV4/IPV6语法通用
-function start_one_to_one_netserver()
-{ 
-    echo -e "start netserver...\c"
-    for i in `seq $PAIR_PORT1 $PAIR_PORT2`;do
-        ssh $ECS_ETH0 "netserver -p $i 2>&1 > /dev/null" 2>&1 > /dev/null
-        sleep 0.01
-        ssh $PEER_ETH0 "netserver -p $i 2>&1 > /dev/null" 2>&1 > /dev/null
-        sleep 0.01
-    done
-
-    ok "done"
-    sleep 1
-}
-
-
 # netperf发送模板，IPV4/IPV6通用
 # 参数：$1发送IP, $2接收IP, $3起始port, $4终止port, $5类型, $6测试时长, $7 包长
 function start_run_send_netperf_template()
@@ -320,14 +304,14 @@ function start_run_send_netperf_template()
 }
 
 
-#单机测试：双向带宽，IPV4/IPV6通用
+# 单机测试：双向带宽，IPV4/IPV6通用
 function start_run_dual_netperf()
 {
     tmpcount=1
     echo -e "\nhost: ${ECS_ETH0} --> ${PEER_ETH0}\tflow:\c" >> $LOGFILE
     for i in `seq $PAIR_PORT1 $PAIR_PORT2`;do
         cmd="netperf -H $PEER_ETH0 -p $i -t TCP_STREAM -l 86400 -- -m 1440"
-        ssh -t -t $C1 $cmd 2>&1 > /dev/null &
+        ssh -t -t $ECS_ETH0 $cmd 2>&1 > /dev/null &
 
         echo -e "${tmpcount} \c" >> $LOGFILE
         ((tmpcount++))
@@ -339,7 +323,7 @@ function start_run_dual_netperf()
     echo -e "\nhost: ${PEER_ETH0} --> ${ECS_ETH0}\tflow:\c"
     for i in `seq $PAIR_PORT1 $PAIR_PORT2`;do
         cmd="netperf -H $ECS_ETH0 -p $i -t TCP_STREAM -l 86400 -- -m 1440"
-        ssh -t -t $C2 $cmd 2>&1 > /dev/null &
+        ssh -t -t $PEER_ETH0 $cmd 2>&1 > /dev/null &
 
         echo -e "$tmpcount \c" >> $LOGFILE
         ((tmpcount++))
@@ -351,13 +335,17 @@ function start_run_dual_netperf()
 }
 
 
-#单机测试：多网卡带宽抢占,IPV4/IPV6通用
-#!!!!网卡个数，流数没有自动适配
-function start_run_multi_port_send_bw_netperf()
+# 单机测试：多网卡带宽/PPS抢占,IPV4/IPV6通用
+# 自动适配流数
+# 参数：$1测试类型TCP_STREAM/UDP_STREAM, $2 包长1440/64
+function start_run_multi_port_send_netperf_template()
 {
+    test_type=$1
+    pkt_len=$2
+
     port_num=`ifconfig | grep ^eth | wc -l`
     if [ $portnum -le 0 ];then
-        echo "eth can not be found!,exit"
+        echo "can not found any eth,exit!!!"
         return
     fi
 
@@ -368,7 +356,7 @@ function start_run_multi_port_send_bw_netperf()
     echo -e "\nhost:$ECS_ETH0 --> $PEER_ETH0 eth0 flow:\c" >> $LOGFILE
     for i in `seq 1 $tmpflow`;do
         tmpport=`expr PAIR_PORT1 + $i - 1`
-        cmd="netperf -H $PEER_ETH0 -p $tmpport -t TCP_STREAM -l 86400 -- -m 1440"
+        cmd="netperf -H $PEER_ETH0 -p $tmpport -t $test_type -l 86400 -- -m $pkt_len"
         ssh -t -t $ECS_ETH0 $cmd 2>&1 > /dev/null &
         sleep 0.1
     done
@@ -387,96 +375,72 @@ function start_run_multi_port_send_bw_netperf()
 
         echo -e "\nhost:$ECS_ETH0 --> $host eth$tmpeth flow:\c" >> $LOGFILE
         tmpport=`expr $PAIR_PORT1 + $tmpflow -1 + $i - 1`
-        cmd="netperf -H $host -p $tmpport -t TCP_STREAM -l 86400 -- -m 1440"
+        cmd="netperf -H $host -p $tmpport -t $test_type -l 86400 -- -m $pkt_len"
         ssh -t -t $C1 $cmd 2>&1 > /dev/null &  
         sleep 0.1
     done
 
-    echo -e "\nstart_run_multi_port_send_bw_netperf done"
+    echo -e "\nstart_run_multi_port_send_netperf_template done,type=$test_type,pkt_len=$pkt_len"
 }
 
 
-#单机测试：多网卡PPS发送,IPV4/IPV6通用
-#!!!!网卡个数，流数没有自动适配
-function portpps_netperf()
-{
-    echo "start eth0"
-    c=1;echo -e "\nhost=$C1 eth0 flow:\c" >> $LOGFILE
-    for i in `seq $P1 7008`;do
-        cmd="netperf -H $C2 -p $i -t UDP_STREAM -l 86400 -- -m 64"
-        ssh -t -t $C1 $cmd 2>&1 > /dev/null &
-
-        echo -e "$c \c" >> $LOGFILE
-        ((c++))
-        sleep 0.1
-   done
-
-   sleep 5
-   for i in `seq 7009 $P2`;do
-        c=1;echo -e "\nhost=$C1 eth1 flow:$c" >> $LOGFILE
-        cmd="netperf -H $eth1 -p 7016 -t UDP_STREAM -l 86400 -- -m 64"
-        ssh -t -t $C1 $cmd 2>&1 > /dev/null &
-        echo -e "$c \c" >> $LOGFILE
-        ((c++))
-        sleep 0.1
-   done
-}
-
-
-#单机测试：多网卡流量统计,IPV4/IPV6通用
-function sar()
-{
-    rm -f eth.txt
-    sleep 20
-    echo -e "\n\nsar begin" 
-    ssh $C1 "sar -n DEV 1 60" >> eth.txt &
-    sleep 65
-
-    cat eth.txt | grep eth | grep -i ave
-}
-
-
-#延迟测试：延迟和丢包,IPV4/IPV6通用
-function pingloss()
+# 延迟测试：延迟和丢包,IPV4/IPV6通用
+function get_ping_and_loss()
 {
     sleep 5
-    echo -e "\n\n$C1 ping start"
-    ret=`get_ip_version $C1`
+    echo -e "\n\n$ECS_ETH0 ping start"
+    ret=`get_ip_version $ECS_ETH0`
     if [ $ret -eq 6 ];then
-        ping -6 -c 60 $C1 | grep -E "avg|loss"
+        ping -6 -c 60 $ECS_ETH0 | grep -E "avg|loss"
     else
-        ping -c 60 $C1 | grep -E "avg|loss"
+        ping -c 60 $ECS_ETH0 | grep -E "avg|loss"
     fi
 
     sleep 5
-    echo -e "\n\n$C1 loss start"
-    ret=`get_ip_version $C1`
+    echo -e "\n\n$ECS_ETH0 loss start"
+    ret=`get_ip_version $ECS_ETH0`
     if [ $ret -eq 6 ];then
-        ping -6 -c 10000 -i 0.01 $C1 | grep -E "avg|loss"
+        ping -6 -c 10000 -i 0.01 $ECS_ETH0 | grep -E "avg|loss"
     else
-        ping -6 -c 10000 -i 0.01 $C1 | grep -E "avg|loss"
+        ping -6 -c 10000 -i 0.01 $ECS_ETH0 | grep -E "avg|loss"
     fi
 }
 
 
-#多机抢占：启动IP地址列表里所有netserver,IPV4/IPV6通用
+# 单机测试1v1：启动一个netserver,IPV4/IPV6语法通用
+function start_one_to_one_netserver()
+{ 
+    echo -e "start netserver...\c"
+    for i in `seq $PAIR_PORT1 $PAIR_PORT2`;do
+        ssh $ECS_ETH0 "netserver -p $i 2>&1 > /dev/null" 2>&1 > /dev/null
+        sleep 0.01
+        ssh $PEER_ETH0 "netserver -p $i 2>&1 > /dev/null" 2>&1 > /dev/null
+        sleep 0.01
+    done
+
+    ok "done"
+    sleep 1
+}
+
+
+# 多机抢占15v15：启动IP地址列表里所有netserver,IPV4/IPV6通用
 function start_all_netserver()
 {
-    for j in `seq 1 $PAIR_NUM`;do
-        h1=${L1[$j]}
-        h2=${L2[$j]}
+    for i in `seq 1 $PAIR_NUM`;do
+        h1=${IP_LIST1[$i]}
+        h2=${IP_LIST2[$i]}
 
         echo -e "start netserver at $h1...\c" >> $LOGFILE
-        for i in `seq $P1 $P2`;do
-            ssh $h1 "netserver -p $i" 2>&1 > /dev/null
+        for j in `seq $PAIR_PORT1 $PAIR_PORT2`;do
+            ssh $h1 "netserver -p $j" 2>&1 > /dev/null
             sleep 0.1
         done
         ok "done"
 
 
         echo -e "start netserver at $h2...\c" >> $LOGFILE
-        for i in `seq $P1 $P2`;do
-            ssh $h2 "netserver -p $i" 2>&1 > /dev/null
+        for j in `seq $PAIR_PORT1 $PAIR_PORT2`;do
+            ssh $h2 "netserver -p $j" 2>&1 > /dev/null
             sleep 0.1
         done
         ok "done"
@@ -487,41 +451,58 @@ function start_all_netserver()
 
 
 #多机抢占15v15：同时发送,IPV4/IPV6通用
-function start_all_send_bw_netperf_tcp1440()
+function start_all_send_bw_netperf()
 {
     for i in `seq 1 $PAIR_NUM`;do
         tmpclient=""
         tmpserver=""
      
-        tmpclient=${L1[$i]}
-        tmpserver=${L2[$i]}
+        tmpclient=${IP_LIST1[$i]}
+        tmpserver=${IP_LIST2[$i]}
      
         echo -e "No.$i\c" >> $LOGFILE
-        maxbw_netperf $tmpclient $tmpserver
+        start_run_send_netperf_template $tmpclient $tmpserver $PAIR_PORT1 $PAIR_PORT2 "TCP_STREAM" 86400 1440
     done
     sleep 1
 }
 
 
 #多机抢占15v15：同时接收，IPV4/IPV6通用
-function start_all_recv_bw_netperf_tcp1440()
+function start_all_recv_bw_netperf()
 {
     for i in `seq 1 $PAIR_NUM`;do
         tmpclient=""
         tmpserver=""
      
-        tmpclient=${L1[$i]}
-        tmpserver=${L2[$i]}
+        tmpclient=${IP_LIST1[$i]}
+        tmpserver=${IP_LIST2[$i]}
      
         echo -e "No.$i\c" >> $LOGFILE
-        maxbw_netperf $tmpserver $tmpclient
+        start_run_send_netperf_template $tmpserver $tmpclient $PAIR_PORT1 $PAIR_PORT2 "TCP_STREAM" 86400 1440
     done
     sleep 1
 }
 
 
 #多机抢占15v15：同时发送netperf UDP 64,IPV4/IPV6通用
-function start_all_send_pps_netperf_udp64()
+function start_all_send_pps_netperf()
+{
+    for i in `seq 1 $PAIR_NUM`;do
+        tmpclient=""
+        tmpserver=""
+
+        tmpclient=${IP_LIST1[$i]}
+        tmpserver=${IP_LIST2[$i]}
+
+        echo -e "No.$i\c" >> $LOGFILE
+        start_run_send_netperf_template $tmpclient $tmpserver $PAIR_PORT1 $PAIR_PORT2 "UDP_STREAM" 86400 64
+    done
+    sleep 1
+}
+
+# !!!!!!上次看到这里
+#多机抢占15v15：同时接收netperf UDP 64,IPV4/IPV6通用
+function start_all_recv_pps_netperf()
 {
     for i in `seq 1 $PAIR_NUM`;do
         tmpclient=""
@@ -531,26 +512,22 @@ function start_all_send_pps_netperf_udp64()
         tmpserver=${L2[$i]}
 
         echo -e "No.$i\c" >> $LOGFILE
-        maxbw_netperf_udp64 $tmpclient $tmpserver
+        start_run_send_netperf_template $tmpserver $tmpclient $PAIR_PORT1 $PAIR_PORT2 "UDP_STREAM" 86400 64
     done
     sleep 1
 }
 
 
-#多机抢占15v15：同时接收netperf UDP 64,IPV4/IPV6通用
-function start_all_recv_pps_netperf_udp64()
+# 单机测试：多网卡流量统计,IPV4/IPV6通用
+function get_one_sar()
 {
-    for i in `seq 1 $PAIR_NUM`;do
-        tmpclient=""
-        tmpserver=""
+    rm -f eth.txt
+    sleep 20
+    echo -e "\n\nsar begin,host=$ECS_ETH0" 
+    ssh $ECS_ETH0 "sar -n DEV 1 60" >> eth.txt &
+    sleep 65
 
-        tmpclient=${L1[$i]}
-        tmpserver=${L2[$i]}
-
-        echo -e "No.$i\c" >> $LOGFILE
-        maxbw_netperf_udp64 $tmpserver $tmpclient
-    done
-    sleep 1
+    cat eth.txt | grep eth | grep -i ave
 }
 
 
