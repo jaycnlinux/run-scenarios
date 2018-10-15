@@ -14,15 +14,32 @@ import time
 import re
 
 
-# 全局变量，PCAP_FILE：输入文件  OUTPUT_FILE：转换后txt文件  PARSE_COUNT：统计多少条
+# 全局变量，PCAP_FILE：输入文件  OUTPUT_FILE：转换后txt文件  PARSE_COUNT：统计多少条  STEP:当前步骤
 PCAP_FILE = ""
 OUTPUT_FILE = ""
 PARSE_COUNT = 1000
+STEP = 1
 
 # syn时间结果列表,syn_pair_list:已匹配的流列表  syn_list：纯syn列表  syn_ack_list:纯syn_ack列表
 syn_pair_list = []
 syn_list = []
 syn_ack_list = []
+
+
+# 函数功能：打印步骤名称,msg：消息  new：是否本行打印结束
+def print_step(msg="", new=False):
+    """
+    # 函数功能：打印步骤名称
+    :param msg: 打印内容
+    :param new: 是否本行打印结束
+    """
+
+    global STEP
+    if new == True:
+        print msg
+        STEP += 1
+    else:
+        print "step: {}\t{:.<50s}".format(STEP,msg),
 
 
 # 函数功能:pcap格式转换为txt文本格式
@@ -38,20 +55,23 @@ def pcap_to_txt(pcap_file=PCAP_FILE):
     cmd = "rm -f %s 2>/dev/null 1>/dev/null" % OUTPUT_FILE
     os.system(cmd)
 
+    print_step("convert pcap to text file")
     # 转换pcap to txt
     cmd = "tcpdump -r %s -nne > %s 2>/dev/null" % (pcap_file, OUTPUT_FILE)
     ret = os.system(cmd)
 
     # 检查是否转换成功，非0则失败
     if ret != 0:
-        print "转换失败，exit。。。"
+        print "转换失败，exit..."
+        cmd = "rm -f $s 2>/dev/null 1>/dev/null" % OUTPUT_FILE
+        os.system(cmd)
         exit(-1)
 
-    print "ok,转换完成"
+    print_step("ok", new=True)
 
 
 # 函数功能：解析syn，syn+ack时间间隔
-def parse_tcp_syn_time(src_file = OUTPUT_FILE, max_count = -1):
+def parse_tcp_syn_time(src_file=OUTPUT_FILE, max_count=-1):
     """
     #函数功能：解析syn，syn+ack时间间隔
     :param src_file: 转换过的txt格式抓包文件
@@ -63,18 +83,19 @@ def parse_tcp_syn_time(src_file = OUTPUT_FILE, max_count = -1):
     global syn_list
     global syn_ack_list
 
+    print_step("read pcap text context")
     # 读取文本
     try:
         f = open(OUTPUT_FILE, 'r')
         pcap_context = f.read().splitlines()
         f.close()
     except:
-        print "读取文件失败 file=%s" % OUTPUT_FILE
+        print "read pcap file failed,file=%s" % OUTPUT_FILE
         exit(-1)
 
     # 开始解析
-    print "开始解析TCP SYN/SYN-ACK报文"
-
+    print_step("ok", new=True)
+    print_step("parse syn packet")
     # 获取所有的syn流，加入syn列表
     index = cur_count = 0
     for i in pcap_context:
@@ -119,9 +140,8 @@ def parse_tcp_syn_time(src_file = OUTPUT_FILE, max_count = -1):
             syn_ack_flow = (index, t, src_ip, dst_ip, ack,)
             syn_ack_list.append(syn_ack_flow)
 
-    print "TCP SYN/SYN+ACK解析完成"
-
-    print "开始匹配"
+    print_step("ok", new=True)
+    print_step("match tcp flow")
     # 匹配完整的流，加入pair列表
     index = cur_count = 0
 
@@ -156,8 +176,8 @@ def parse_tcp_syn_time(src_file = OUTPUT_FILE, max_count = -1):
 
                 syn_pair_list.append(tcp_flow)
 
-    print "匹配完成"
-    print "开始计算TCP-SYN时间消耗"
+    print_step("ok", new=True)
+    print_step("calculate syn time")
 
     # 当前索引位置
     cur_index = 0
@@ -186,6 +206,7 @@ def parse_tcp_syn_time(src_file = OUTPUT_FILE, max_count = -1):
 
         cur_index += 1
 
+    print_step("ok", new=True)
 
 # 函数功能：打印时间消耗列表
 def print_syn_time_used():
@@ -194,13 +215,16 @@ def print_syn_time_used():
     """
 
     global syn_pair_list
+    min_time = -1
+    max_time = -1
 
     # 打印表头
     header_format = "%-7s %-7s  %s %s --> %s %s"
     seperate_format = "-"*70
     data_format = "%-7d %-7d  [%d] %s --> [%d] %s"
 
-    print(header_format % ("No.", "us", "[id1]", "src_ip", "[id2]", "dst_ip"))
+    print
+    print(header_format % ("No.", "us", "[pkt_id1]", "src_ip", "[pkt_id2]", "dst_ip"))
     print seperate_format
 
     cur_index = 0
@@ -208,10 +232,23 @@ def print_syn_time_used():
     for i in syn_pair_list:
         avg_time += i[-1]
         cur_index += 1
+
+        if min_time == -1:
+            min_time = i[-1]
+
+        if max_time == -1:
+            max_time = i[-1]
+
+        if i[-1] < min_time:
+            min_time = i[-1]
+
+        if i[-1] > max_time:
+            max_time = i[-1]
+
         print(data_format % (cur_index, i[-1], i[0], i[2], i[5], i[3]))
 
     print seperate_format
-    print "avg time: %d (us)\ttotal count: %d" % (avg_time/cur_index, cur_index)
+    print "avg_time:%d us  total_count:%d  min_time:%d us  max_time:%d us" % (avg_time/cur_index, cur_index, min_time, max_time)
     print seperate_format
 
 
@@ -225,7 +262,7 @@ def main():
 if __name__ == '__main__':
     # 参数校验
     if len(sys.argv) <= 1:
-        print "你pcap文件名都不给，我怎么知道分析啥。。。\nUsage: python %s file" % sys.argv[0]
+        print "你pcap文件名都不给，我怎么知道分析啥...\nUsage: python %s file" % sys.argv[0]
         exit(-1)
     elif len(sys.argv) == 2:
         PCAP_FILE = sys.argv[1]
@@ -246,4 +283,4 @@ if __name__ == '__main__':
     # 清理临时文件
     cmd = "rm -f %s 2>/dev/null 1>/dev/null" % OUTPUT_FILE
     os.system(cmd)
-    print "work complete,全部搞完了!"
+    print "work complete, all done!"
