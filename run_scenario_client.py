@@ -1007,6 +1007,7 @@ def run_multi_user_memcached(serverip, base_port=9001, flow=4, test_time=60, thr
     global SHORT_SLEEP
     # 局部变量
     ret_value = []
+    sum_result = {}
 
     #打印表头
     cmd = "memcached %d flow" % flow
