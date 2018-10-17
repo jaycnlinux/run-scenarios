@@ -28,7 +28,6 @@ def print_log(content):
     #函数功能：打印到日志
     :param content: 打印的内容，可以为字符串，也可以为列表，元组
     """
-
     global LOG_FILE
     if content:
         f = open(LOG_FILE, 'a+')
@@ -36,7 +35,7 @@ def print_log(content):
             print str(content)
             f.write(str(content)+"\n")
             f.close()
-        finally:
+        except Exception:
             f.close()
 
 
@@ -46,8 +45,7 @@ def print_task_name(task=""):
     #函数功能：打印测试任务名称
     :param task: 任务名称
     """
-
-    task_name = "=" * 20 + "  " + task + "  " + "=" * 20
+    task_name = "\n" + "="*20 + "  " + task + "  " + "="*20
     print_log(task_name)
 
 
@@ -76,7 +74,7 @@ def shutdown_process(process_name):
             pid = int(process_info[1])
             os.kill(pid, 9)
             time.sleep("0.1")
-        except:
+        except Exception:
             ret_val = ERROR
 
     f.close()
@@ -107,26 +105,35 @@ def run_ping(serverip, count=60, byte=64, interval=1.0, many=1):
     :param interval: ping间隔
     :param many: 测试次数
     """
-
     # 全局变量
     global SHORT_SLEEP
     # 局部变量
     ret_value = []
     sum_result = {}
+    pkt_send = -1
+    pkt_recv = -1
+    pkt_loss_percent = 0
+    avg_lat = -1
 
     # 打印表头
     print_task_name("ping")
-
     cmd = "ping %s -c %d -W 5 -s %d -i %f" % (serverip, count, byte, interval)
     print_log(cmd)
+
+    # 判断ping程序是否存在，不存在则退出
+    if os.system("ping -V 2>/dev/null 1>/dev/null") != 0:
+        sum_result["type"] = "ping"
+        sum_result["success"] = 0
+        ret_value.append((avg_lat, pkt_loss_percent, pkt_send, pkt_recv))
+        print "ERROR: ping not exist"
+        return ret_value, sum_result
+
     for i in range(1, many+1):
         print_log("Round: %d" % i)
-
         pkt_send = -1
         pkt_recv = -1
         pkt_loss_percent = 0
         avg_lat = -1
-
         f = os.popen(cmd)
         tmp_ret = f.read().strip()
         f.close()
@@ -151,7 +158,7 @@ def run_ping(serverip, count=60, byte=64, interval=1.0, many=1):
                 avg_lat *= 1000
             elif unit_str == "us":
                 avg_lat /= 1000.0
-            pkt_loss_percent = (1.0 - float(pkt_recv)/float(pkt_send))*100
+            pkt_loss_percent = (1.0 - float(pkt_recv) / float(pkt_send)) * 100
 
         # 格式化处理
         avg_lat = round(avg_lat, 3)
@@ -209,12 +216,20 @@ def run_qperf(serverip, test_time=60, byte=64, test_type="udp_lat", many=1):
     # 局部变量
     ret_value = []
     sum_result = {}
+    qperf_lat = -1
 
     # 打印表头
     print_task_name("qperf")
-
     cmd = "qperf %s -t %d -m %d -vu %s" % (serverip, test_time, byte, test_type)
     print_log(cmd)
+
+    # 判断qperf程序是否存在
+    if os.system("qperf -V 2>/dev/null 1>/dev/null") != 0:
+        sum_result["success"] = 0
+        ret_value.append((qperf_lat,))
+        print "ERROR: qperf not exist"
+        return ret_value, sum_result
+
     for i in range(1, many+1):
         print_log("Round: %d" % i)
         qperf_lat = -1
@@ -272,7 +287,6 @@ def run_one_netperf(serverip, port=12865, test_type="TCP_STREAM", test_time=60, 
 
     # 全局变量
     global LONG_SLEEP
-
     # 局部变量
     ret_value = []
     sum_result = {}
@@ -281,7 +295,6 @@ def run_one_netperf(serverip, port=12865, test_type="TCP_STREAM", test_time=60, 
     tcp_rr = -1
     tcp_crr = -1
     udp_rr = -1
-    syntax_error = False
 
     test_type = test_type.upper()
     # 打印表头
@@ -293,50 +306,55 @@ def run_one_netperf(serverip, port=12865, test_type="TCP_STREAM", test_time=60, 
     elif test_type == "TCP_RR" or test_type == "TCP_CRR" or test_type == "UDP_RR":
         cmd = "netperf -H %s -p %d -t %s -l %d -- -r %d" % (serverip, port, test_type, test_time, byte)
     else:
-        cmd = "fail: netperf syntax error"
-        syntax_error = True
+        sum_result["success"] = 0
+        ret_value.append((-1,))
+        print "ERROR: netperf syntax error"
+        return ret_value, sum_result
 
+    # 判断netperf程序是否存在，不存在则退出
+    if os.system("netperf -V 2>/dev/null 1>/dev/null") != 0:
+        sum_result["success"] = 0
+        ret_value.append((-1,))
+        print "ERROR: netperf not exist"
+        return ret_value, sum_result
+
+    print_log(cmd)
     for i in range(1, many+1):
-        print_log("Round: %d\tcmd=%s" % (i, cmd))
-
+        print_log("Round: %d" % i)
         tx_bw = -1
         rx_bw = -1
         tcp_rr = -1
         tcp_crr = -1
         udp_rr = -1
-        if not syntax_error:
-
-            try:
-                f = os.popen(cmd)
-                tmp_ret = f.readlines()
-
-                # 输出正常
-                if test_type == "TCP_STREAM":
-                    tx_str = tmp_ret[-1].split()
-                    tx_bw = float(tx_str[-1])
-                    rx_bw = tx_bw
-                elif test_type == "UDP_STREAM":
-                    tx_str = tmp_ret[-3].split()
-                    rx_str = tmp_ret[-2].split()
-                    tx_bw = float(tx_str[-1])
-                    rx_bw = float(rx_str[-1])
-                elif test_type == "TCP_RR":
-                    rr_str = tmp_ret[-2].split()
-                    tcp_rr = float(rr_str[-1])
-                elif test_type == "TCP_CRR":
-                    crr_str = tmp_ret[-2].split()
-                    tcp_crr = float(crr_str[-1])
-                elif test_type == "UDP_RR":
-                    udp_rr_str = tmp_ret[-2].split()
-                    udp_rr = float(udp_rr_str[-1])
-
-                f.close()
-            except:
-                tx_bw = -1
-                rx_bw = -1
-                tcp_rr = -1
-                tcp_crr = -1
-                udp_rr = -1
+        try:
+            f = os.popen(cmd)
+            tmp_ret = f.readlines()
+            f.close()
+            # 输出正常
+            if test_type == "TCP_STREAM":
+                tx_str = tmp_ret[-1].split()
+                tx_bw = float(tx_str[-1])
+                rx_bw = tx_bw
+            elif test_type == "UDP_STREAM":
+                tx_str = tmp_ret[-3].split()
+                rx_str = tmp_ret[-2].split()
+                tx_bw = float(tx_str[-1])
+                rx_bw = float(rx_str[-1])
+            elif test_type == "TCP_RR":
+                rr_str = tmp_ret[-2].split()
+                tcp_rr = float(rr_str[-1])
+            elif test_type == "TCP_CRR":
+                crr_str = tmp_ret[-2].split()
+                tcp_crr = float(crr_str[-1])
+            elif test_type == "UDP_RR":
+                udp_rr_str = tmp_ret[-2].split()
+                udp_rr = float(udp_rr_str[-1])
+        except:
+            tx_bw = -1
+            rx_bw = -1
+            tcp_rr = -1
+            tcp_crr = -1
+            udp_rr = -1
 
         # 格式化处理
         tx_bw = round(tx_bw)
@@ -385,23 +403,24 @@ def run_one_netperf(serverip, port=12865, test_type="TCP_STREAM", test_time=60, 
     sum_result["success"] = sum_count
     sum_result["byte"] = byte
 
-    if test_type == "TCP_STREAM":
-        sum_tx_bw = round(sum_tx_bw/sum_count)
-        sum_result["tx_bw"] = sum_tx_bw
-    elif test_type == "UDP_STREAM":
-        sum_tx_bw = round(sum_tx_bw/sum_count)
-        sum_rx_bw = round(sum_rx_bw/sum_count)
-        sum_result["tx_bw"] = sum_tx_bw
-        sum_result["rx_bw"] = sum_rx_bw
-    elif test_type == "TCP_RR":
-        sum_tcp_rr = round(sum_tcp_rr/sum_count)
-        sum_result["tcp_rr"] = sum_tcp_rr
-    elif test_type == "TCP_CRR":
-        sum_tcp_crr = round(sum_tcp_crr/sum_count)
-        sum_result["tcp_crr"] = sum_tcp_crr
-    elif test_type == "UDP_RR":
-        sum_udp_rr = round(sum_udp_rr/sum_count)
-        sum_result["udp_rr"] = sum_udp_rr
+    if sum_count > 0:
+        if test_type == "TCP_STREAM":
+            sum_tx_bw = round(sum_tx_bw/sum_count)
+            sum_result["tx_bw"] = sum_tx_bw
+        elif test_type == "UDP_STREAM":
+            sum_tx_bw = round(sum_tx_bw/sum_count)
+            sum_rx_bw = round(sum_rx_bw/sum_count)
+            sum_result["tx_bw"] = sum_tx_bw
+            sum_result["rx_bw"] = sum_rx_bw
+        elif test_type == "TCP_RR":
+            sum_tcp_rr = round(sum_tcp_rr/sum_count)
+            sum_result["tcp_rr"] = sum_tcp_rr
+        elif test_type == "TCP_CRR":
+            sum_tcp_crr = round(sum_tcp_crr/sum_count)
+            sum_result["tcp_crr"] = sum_tcp_crr
+        elif test_type == "UDP_RR":
+            sum_udp_rr = round(sum_udp_rr/sum_count)
+            sum_result["udp_rr"] = sum_udp_rr
 
     return ret_value, sum_result
 
@@ -428,10 +447,18 @@ def run_one_ab(serverip, port=80, page="/", user_num=100, total_count=1000000, m
 
     # 打印表头
     print_task_name("ab -c %d" % user_num)
-
     cmd = "ab -c %d -n %d http://%s:%s%s 2>/dev/null" % (user_num, total_count, serverip, port, page)
+    print_log(cmd)
+
+    # 判断ab是否存在
+    if os.system("ab -V 2>/dev/null 1>/dev/null") != 0:
+        sum_result["success"] = 0
+        ret_value.append((-1,))
+        print "ERROR: ab not exist"
+        return ret_value, sum_result
+
     for i in range(1, many + 1):
-        print_log("Round: %d\tcmd=%s" % (i, cmd))
+        print_log("Round: %d" % i)
         f = os.popen(cmd)
         tmp_ret = f.readlines()
         f.close()
@@ -486,9 +513,10 @@ def run_one_ab(serverip, port=80, page="/", user_num=100, total_count=1000000, m
             if i[2] > sum_longest:
                 sum_longest = i[2]
 
-    sum_rps = round(sum_rps/sum_count)
-    sum_time = round(sum_time/sum_count)
-    sum_longest = longest_time
+    if sum_count > 0:
+        sum_rps = round(sum_rps/sum_count)
+        sum_time = round(sum_time/sum_count)
+        sum_longest = longest_time
 
     sum_result["success"] = sum_count
     sum_result["rps"] = sum_rps
@@ -519,8 +547,14 @@ def run_one_memcached(serverip, port=11211, test_time=60, threads=16, concurrenc
 
     # 打印表头
     print_task_name("one user memcached")
-
     cmd = "memaslap -s %s:%d -t %ds -T %d -c %d -X %dB" % (serverip, port, test_time, threads, concurrency, byte)
+
+    # 判断memaslap是否存在
+    if os.system("memaslap -V 2>/dev/null 1>/dev/null") != 0:
+        sum_result["success"] = 0
+        ret_value.append((-1,))
+        print "ERROR: memaslap not exist"
+        return ret_value, sum_result
 
     for i in range(1, many + 1):
         print_log("Round: %d\tcmd=%s" % (i, cmd))
@@ -584,12 +618,13 @@ def run_scp_speed(serverip, size=10240, many=1):
     # 打印表头
     print_task_name("SCP Test")
     filename = "/root/%dG" % (size/1024)
-    cmd = "dd if=/dev/zero of=%s bs=1M count=%d" % (filename, size)
+    cmd = "dd if=/dev/zero of=%s bs=1M count=%d 2>/dev/null 1>/dev/null" % (filename, size)
     os.system(cmd)
-
     cmd = "scp %s root@%s:" % (filename, serverip)
+    print_log(cmd)
+
     for i in range(1, many + 1):
-        print_log("Round: %d\tcmd=%s" % (i, cmd))
+        print_log("Round: %d" % i)
         tmp_file = "/tmp/scp.log"
         os.system("rm -f %s" % tmp_file)
 
@@ -638,7 +673,8 @@ def run_scp_speed(serverip, size=10240, many=1):
             sum_count += 0
             sum_speed += i[0]
 
-    sum_speed = round(sum_speed/sum_count)
+    if sum_count > 0:
+        sum_speed = round(sum_speed/sum_count)
     sum_result["success"] = sum_count
     sum_result["scp_speed(MB/s)"] = sum_speed
 
@@ -663,6 +699,13 @@ def run_meinian_udp_check(serverip, check_num=20, many=1):
     # 打印表头
     print_task_name("meinian UDP check")
     cmd = "sh /root/ConstructTest/Linux/client.sh %s" % serverip
+
+    # 判断程序是否存在
+    if not os.path.isfile("/root/ConstructTest/Linux/client.sh"):
+        sum_result["success"] = 0
+        ret_value.append((-1,))
+        print "ERROR: memaslap not exist"
+        return ret_value, sum_result
 
     for i in range(1, many + 1):
         print_log("Round: %d\tcmd=%s" % (i, cmd))
@@ -737,10 +780,17 @@ def run_multi_user_netperf_send_bandwidth(serverip, flow=16, base_port=7001, typ
 
     # 打印表头
     print_task_name(cmd)
+    print_log(cmd)
+
+    # 判断netperf程序是否存在，不存在则退出
+    if os.system("netperf -V 2>/dev/null 1>/dev/null") != 0:
+        sum_result["success"] = 0
+        ret_value.append((-1,))
+        print "ERROR: netperf not exist"
+        return ret_value, sum_result
 
     for i in range(1, many+1):
-        cmd = "netperf %s %d flow" % (type, flow)
-        print_log("Round: %d\tcmd=%s" % (i, cmd))
+        print_log("Round: %d" % i)
         tcp_bw = -1
         for j in range(1, flow+1):
             port = base_port + j - 1
@@ -782,7 +832,8 @@ def run_multi_user_netperf_send_bandwidth(serverip, flow=16, base_port=7001, typ
             sum_count += 0
             sum_bw += i[0]
 
-    sum_bw = round(sum_bw/sum_count)
+    if sum_count > 0:
+        sum_bw = round(sum_bw/sum_count)
     sum_result["success"] = sum_count
     sum_result["type"] = type
     sum_result["tx_bw"] = sum_bw
@@ -790,7 +841,7 @@ def run_multi_user_netperf_send_bandwidth(serverip, flow=16, base_port=7001, typ
     return ret_value, sum_result
 
 
-# 函数功能：多流TCP_RR
+# 函数功能：多流TCP_RR，改到这里
 def run_multi_user_tcp_rr(serverip, flow=16, base_port=7001, test_type="TCP_RR", test_time=120, byte=64, many=1):
     """
     #函数功能：多流TCP_RR
@@ -812,31 +863,42 @@ def run_multi_user_tcp_rr(serverip, flow=16, base_port=7001, test_type="TCP_RR",
     # 打印表头
     print_task_name(cmd)
     print_log(cmd)
+
+    # 判断netperf程序是否存在，不存在则退出
+    if os.system("netperf -V 2>/dev/null 1>/dev/null") != 0:
+        sum_result["success"] = 0
+        ret_value.append((-1,))
+        print "ERROR: netperf not exist"
+        return ret_value, sum_result
+
     for i in range(1, many + 1):
         print_log("Round: %d" % i)
         tcp_rr = 0
 
-        # 临时文件
-        tmp_prefix = "/tmp/netperf_rr_"
-        cmd = "rm -f %s* 2>&1 > /dev/null" % tmp_prefix
-        os.system(cmd)
-
-        for j in range(1, flow+1):
-            port = base_port + j - 1
-            cmd = "netperf -H %s -p %d -t %s -l %d -- -r %d 2>&1 > %s%d.log &" \
-                   % (serverip, port, test_type, test_time, byte, tmp_prefix, port)
+        try:
+            # 临时文件
+            tmp_prefix = "/tmp/netperf_rr_"
+            cmd = "rm -f %s* 2>&1 > /dev/null" % tmp_prefix
             os.system(cmd)
 
-        # 获取结果
-        time.sleep(5 + test_time)
-        for j in range(1, flow+1):
-            port = base_port + j - 1
-            tmp_file = "%s%d.log" % (tmp_prefix, port)
-            f = open(tmp_file)
-            tmp_ret = f.read().splitlines()
-            f.close()
-            rr_str = tmp_ret[-2].strip().split(" ")[-1]
-            tcp_rr += float(rr_str)
+            for j in range(1, flow+1):
+                port = base_port + j - 1
+                cmd = "netperf -H %s -p %d -t %s -l %d -- -r %d 2>&1 > %s%d.log &" \
+                       % (serverip, port, test_type, test_time, byte, tmp_prefix, port)
+                os.system(cmd)
+
+            # 获取结果
+            time.sleep(5 + test_time)
+            for j in range(1, flow+1):
+                port = base_port + j - 1
+                tmp_file = "%s%d.log" % (tmp_prefix, port)
+                f = open(tmp_file)
+                tmp_ret = f.read().splitlines()
+                f.close()
+                rr_str = tmp_ret[-2].strip().split(" ")[-1]
+                tcp_rr += float(rr_str)
+        except Exception:
+            tcp_rr = -1
 
         # 数据格式化
         tcp_rr = round(tcp_rr)
@@ -866,7 +928,6 @@ def run_multi_user_tcp_crr(serverip, flow=16, base_port=7001, type="TCP_CRR", te
     :param byte: 测试包长
     :param many: 测试次数
     """
-
     #局部变量
     ret_value = []
     tcp_crr = -1
@@ -874,6 +935,13 @@ def run_multi_user_tcp_crr(serverip, flow=16, base_port=7001, type="TCP_CRR", te
 
     # 打印表头
     print_task_name(cmd)
+
+    # 判断netperf程序是否存在，不存在则退出
+    if os.system("netperf -V 2>/dev/null 1>/dev/null") != 0:
+        sum_result["success"] = 0
+        ret_value.append((-1,))
+        print "ERROR: netperf not exist"
+        return ret_value, sum_result
 
     for i in range(1, many + 1):
         cmd = "netperf %s %d flow" % (type, flow)
@@ -935,13 +1003,21 @@ def run_multi_user_memcached(serverip, base_port=9001, flow=4, test_time=60, thr
     :param byte: 包长
     :param many:测试次数
     """
-
+    # 全局变量
+    global SHORT_SLEEP
     # 局部变量
     ret_value = []
 
     #打印表头
     cmd = "memcached %d flow" % flow
     print_task_name(cmd)
+
+    # 判断memaslap是否存在
+    if os.system("memaslap -V 2>/dev/null 1>/dev/null") != 0:
+        sum_result["success"] = 0
+        ret_value.append((-1,))
+        print "ERROR: memaslap not exist"
+        return ret_value, sum_result
 
     for i in range(1, many + 1):
         cmd = "memcached %d flow" % flow
@@ -991,14 +1067,14 @@ def run_multi_user_memcached(serverip, base_port=9001, flow=4, test_time=60, thr
         cmd = "rm -f %s* 2>&1 > /dev/null" % (tmp_prefix)
         os.system(cmd)
 
-        #多次测试之间停留10s
+        #多次测试之间停留
         if i < many:
-            time.sleep(10)
+            time.sleep(SHORT_SLEEP)
 
     return ret_value
 
 
-#函数功能，测试c1000k并发连接数
+#函数功能，测试c1000k并发连接数，待处理平均数
 def run_multi_user_c1000k(serverip, flow=2, base_port=11000, many=1):
     """
     #函数功能，测试c1000k并发连接数
@@ -1007,13 +1083,20 @@ def run_multi_user_c1000k(serverip, flow=2, base_port=11000, many=1):
     :param base_port:
     :param many:
     """
-
+    # 全乎变量
+    global HUGE_SLEEP
     #局部变量
     ret_value = []
     cmd = "c1000k %d flow test" % flow
 
     # 打印表头
     print_task_name(cmd)
+    # 判断程序是否存在
+    if not os.path.isfile("%s/client" % os.getcwd()):
+        sum_result["success"] = 0
+        ret_value.append((-1,))
+        print "ERROR: c1000k client not exist"
+        return ret_value, sum_result
 
     for i in range(1, many + 1):
         print_log("Round: %d\tcmd=%s" % (i, cmd))
@@ -1072,7 +1155,7 @@ def run_multi_user_c1000k(serverip, flow=2, base_port=11000, many=1):
 
         # 2次测试程序间隔600s以上,让计算节点tcp老化
         if i < many:
-            time.sleep(700)
+            time.sleep(HUGE_SLEEP)
 
     return ret_value
 
