@@ -1087,6 +1087,7 @@ def run_multi_user_c1000k(serverip, flow=2, base_port=11000, many=1):
     global HUGE_SLEEP
     #局部变量
     ret_value = []
+    sum_result = {}
     cmd = "c1000k %d flow test" % flow
 
     # 打印表头
