@@ -119,20 +119,19 @@ def install_tools():
 
     # 局部变量
     current_dir = os.getcwd() + "/" + TOOLS_DIR
+    cmd = ""
 
-    # qperf
-    if os.system("qperf -V 2>/dev/null 1>/dev/null") != 0:
-        cmd = "rm -f /usr/bin/qperf 2>/dev/null 1>/dev/null;" + \
-              "rm -f /usr/sbin/qperf 2>/dev/null 1>/dev/null;" + \
-              "cp %s/qperf /usr/bin/qperf 2>/dev/null 1>/dev/null" % current_dir
-        os.system(cmd)
-        cmd = "chmod 777 "
+    # qperf netperf netserver
+    soft_list = ["qperf", "netperf", "netserver"]
+    for i in soft_list:
+        cmd = "%s -V 2>/dev/null 1>/dev/null" % i
+        if os.system(cmd) != 0:
+            cmd = "rm -f /usr/bin/%s 2>/dev/null 1>/dev/null;cp %s/%s /usr/bin/%s 2>/dev/null 1>/dev/null" \
+                  % (i, current_dir, i, i)
+            os.system(cmd)
+            cmd = "chmod 777 /usr/bin/%s 2>/dev/null 1>/dev/null" % i
+            os.system(cmd)
 
-
-
-    # netperf
-    if os.system("netperf -V 2>/dev/null 1>/dev/null") != 0:
-        cmd = ""
 
 # 函数功能：启动server
 def start_server():
