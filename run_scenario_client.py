@@ -1,6 +1,8 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 # __author__ = 'c00406647'
+# version: v0.1
+# date: 2018-10-18
 
 
 import os
@@ -20,6 +22,7 @@ TEST_MANY = 5
 SHORT_SLEEP = 10
 LONG_SLEEP = 60
 HUGE_SLEEP = 900
+TOOLS_DIR = "tools"
 
 
 # 函数功能：打印到日志
@@ -74,7 +77,7 @@ def shutdown_process(process_name):
             pid = int(process_info[1])
             os.kill(pid, 9)
             time.sleep("0.1")
-        except Exception:
+        except:
             ret_val = ERROR
 
     f.close()
@@ -89,6 +92,47 @@ def off():
     for i in process_list:
         shutdown_process(i)
 
+
+# 函数功能：安装软件子进程
+def exec_shell_command(target_host, cmd, is_local=False):
+    """
+    # 函数功能：安装软件子进程
+    :param host: 所在主机
+    :param cmd: 命令
+    :param islocal: 是否本机
+    """
+
+    if is_local:
+        os.system("%s 2>/dev/null 1>/dev/null" % cmd)
+    else:
+        cmd2 = "ssh %s '%s 2>/dev/null 1>/dev/null' 2>/dev/null 1>/dev/null" % (target_host, cmd)
+        os.system(cmd2)
+
+
+# 函数功能：安装程序qperf netperf iperf3.3 ab nginx memcached meinian_udp c1000k
+def install_tools():
+    """
+    # 函数功能：安装程序
+    """
+    # 全局变量
+    global TOOLS_DIR
+
+    # 局部变量
+    current_dir = os.getcwd() + "/" + TOOLS_DIR
+
+    # qperf
+    if os.system("qperf -V 2>/dev/null 1>/dev/null") != 0:
+        cmd = "rm -f /usr/bin/qperf 2>/dev/null 1>/dev/null;" + \
+              "rm -f /usr/sbin/qperf 2>/dev/null 1>/dev/null;" + \
+              "cp %s/qperf /usr/bin/qperf 2>/dev/null 1>/dev/null" % current_dir
+        os.system(cmd)
+        cmd = "chmod 777 "
+
+
+
+    # netperf
+    if os.system("netperf -V 2>/dev/null 1>/dev/null") != 0:
+        cmd = ""
 
 # 函数功能：启动server
 def start_server():
@@ -426,7 +470,7 @@ def run_one_netperf(serverip, port=12865, test_type="TCP_STREAM", test_time=60, 
 
 
 # 函数功能：测试ab -c 100 -n 5000000，获取RPS、avg time、100%time
-def run_one_ab(serverip, port=80, page="/", user_num=100, total_count=1000000, many=1):
+def run_one_ab(serverip, port=80, page="/", user_num=100, total_count=5000000, many=1):
     """
     #函数功能：测试ab -c 100 -n 5000000，获取RPS、avg time、100%time
     :param serverip: 服务器IP
@@ -857,6 +901,7 @@ def run_multi_user_tcp_rr(serverip, flow=16, base_port=7001, test_type="TCP_RR",
     global SHORT_SLEEP
     # 局部变量
     ret_value = []
+    sum_result = {}
     tcp_rr = -1
     cmd = "netperf %s %d flow" % (test_type, flow)
 
@@ -930,6 +975,7 @@ def run_multi_user_tcp_crr(serverip, flow=16, base_port=7001, type="TCP_CRR", te
     """
     #局部变量
     ret_value = []
+    sum_result = {}
     tcp_crr = -1
     cmd = "netperf %s %d flow" % (type, flow)
 
@@ -1086,7 +1132,7 @@ def run_multi_user_c1000k(serverip, flow=2, base_port=11000, many=1):
     """
     # 全乎变量
     global HUGE_SLEEP
-    #局部变量
+    # 局部变量
     ret_value = []
     sum_result = {}
     cmd = "c1000k %d flow test" % flow
@@ -1103,19 +1149,19 @@ def run_multi_user_c1000k(serverip, flow=2, base_port=11000, many=1):
     for i in range(1, many + 1):
         print_log("Round: %d\tcmd=%s" % (i, cmd))
 
-        #执行c1000k测试
+        # 执行c1000k测试
         for j in range(1, flow + 1):
             port = base_port + (j-1)*2000
             cmd = "%s/client %s %d 2>&1 > /dev/null &" % (os.getcwd(), serverip, port)
             os.system(cmd)
             time.sleep(10)
 
-        #获取连接数
+        # 获取连接数
         old = new = 0
         max_conn = 0
         same_time = 0
 
-        #采集连接数
+        # 采集连接数
         while True:
             cmd = "ss -s"
             f = os.popen(cmd)
@@ -1128,31 +1174,31 @@ def run_multi_user_c1000k(serverip, flow=2, base_port=11000, many=1):
                     new = int(k[pos1:pos2].strip())
                     f.close()
 
-            #获取最大连接数
+            # 获取最大连接数
             if new > max_conn:
                 max_conn = new
 
-            #数据与上次相比，变化了没有
+            # 数据与上次相比，变化了没有
             if new == old:
                 same_time += 1
             else:
                 same_time = 0
 
-            #连续N次连接数不更新，认为结束，退出采集
+            # 连续N次连接数不更新，认为结束，退出采集
             if same_time > 10:
                 break
 
-            #进入下一次采集
+            # 进入下一次采集
             old = new
             time.sleep(10)
 
-        #关闭client程序
+        # 关闭client程序
         process_name = "%s/client" % os.getcwd()
         print "our time is short!"
         print process_name
         shutdown_process(process_name)
 
-        #结果处理
+        # 结果处理
         ret_value.append((max_conn,))
 
         # 2次测试程序间隔600s以上,让计算节点tcp老化
@@ -1164,6 +1210,8 @@ def run_multi_user_c1000k(serverip, flow=2, base_port=11000, many=1):
 
 ############  main函数入口  ############
 def main():
+    install_tools()
+    '''
     global host
     global TEST_TIME
     global TEST_MANY
@@ -1215,7 +1263,7 @@ def main():
 
     ret = run_multi_user_memcached(host, test_time=TEST_TIME, many=TEST_MANY)
     print_log(ret)
-
+    '''
 
 if __name__ == '__main__':
     main()
