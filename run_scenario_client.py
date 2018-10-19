@@ -8,6 +8,9 @@
 import os
 import subprocess
 import time
+import pexpect
+
+
 from datetime import datetime as datetime
 
 
@@ -16,7 +19,7 @@ ERROR = -1
 SUCCESS = 0
 LOG_TIME = time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime(time.time()))
 LOG_FILE = "./%s.log" % LOG_TIME
-host = "192.168.0.12"
+host = "192.168.1.74"
 TEST_TIME = 120
 TEST_MANY = 5
 SHORT_SLEEP = 10
@@ -93,20 +96,62 @@ def off():
         shutdown_process(i)
 
 
+# 函数功能：建立SSH信任关系
+def set_ssh_key(host, key_type="password", key_value="Huawei@123"):
+    """
+    # 函数功能：建立SSH信任关系
+    :param host:
+    """
+    # 局部变量
+    ssh = None
+
+    # 判断本端id_rsa是否存在
+    if os.path.isfile("/root/.ssh/id_rsa") is False:
+        ssh = pexpect.spawn("ssh-keygen -t rsa")
+        ssh.sendline("")
+        time.sleep(0.2)
+        ssh.sendline("")
+        time.sleep(0.2)
+        ssh.sendline("")
+        time.sleep(5)
+        ssh.close()
+        print "ssh-keygen -t rsa success"
+
+    ssh = pexpect.spawn("ssh-copy-id %s" % host)
+    try:
+        i = ssh.expect(['password:', 'continue connecting (yes/no)?'], timeout=5)
+        if i == 0:
+            ssh.sendline(key_value)
+            time.sleep(5)
+        elif i == 1:
+            ssh.sendline("yes")
+            ssh.expect("password:")
+            ssh.sendline(key_value)
+            time.sleep(5)
+    except pexpect.EOF:
+        ssh.close()
+    except Exception, e:
+        print "SSH error: %s" % e
+
+
 # 函数功能：安装软件子进程
-def exec_shell_command(target_host, cmd, is_local=False):
+def exec_shell_command(cmd, target_host=""):
     """
     # 函数功能：安装软件子进程
-    :param host: 所在主机
     :param cmd: 命令
-    :param islocal: 是否本机
+    :param target_host: 所在主机
     """
 
-    if is_local:
-        os.system("%s 2>/dev/null 1>/dev/null" % cmd)
+    # 局部变量
+    ret = 0
+
+    if target_host == "":
+        ret = os.system("%s 2>/dev/null 1>/dev/null" % cmd)
     else:
         cmd2 = "ssh %s '%s 2>/dev/null 1>/dev/null' 2>/dev/null 1>/dev/null" % (target_host, cmd)
-        os.system(cmd2)
+        ret = os.system(cmd2)
+
+    return ret
 
 
 # 函数功能：安装程序qperf netperf iperf3.3 ab nginx memcached meinian_udp c1000k
@@ -115,28 +160,158 @@ def install_tools():
     # 函数功能：安装程序
     """
     # 全局变量
+    global host
     global TOOLS_DIR
 
     # 局部变量
     current_dir = os.getcwd() + "/" + TOOLS_DIR
+    cmd_list = []
 
-    # qperf
-    if os.system("qperf -V 2>/dev/null 1>/dev/null") != 0:
-        cmd = "rm -f /usr/bin/qperf 2>/dev/null 1>/dev/null;" + \
-              "rm -f /usr/sbin/qperf 2>/dev/null 1>/dev/null;" + \
-              "cp %s/qperf /usr/bin/qperf 2>/dev/null 1>/dev/null" % current_dir
-        os.system(cmd)
-        cmd = "chmod 777 "
+    # qperf netperf netserver
+    soft_list = ["qperf", "netperf", "netserver"]
+    for i in soft_list:
+        # 如果不存在则安装,local
+        if exec_shell_command("/usr/bin/%s -V" % i, target_host="") != 0:
+            del cmd_list[:]
+            cmd_list.append("rm -f /usr/bin/%s" % i)
+            cmd_list.append("rm -f /usr/sbin/%s" % i)
+            cmd_list.append("cp %s/%s /usr/bin/" % (current_dir, i))
+            cmd_list.append("cp %s/%s /usr/sbin/" % (current_dir, i))
+            cmd_list.append("chmod 777 /usr/bin/%s" % i)
+            cmd_list.append("chmod 777 /usr/sbin/%s" % i)
+            for j in cmd_list:
+                exec_shell_command(cmd=j, target_host="")
 
+        # remote
+        if exec_shell_command("/usr/bin/%s -V" % i, target_host=host) != 0:
+            del cmd_list[:]
+            cmd_list.append("rm -f /usr/bin/%s" % i)
+            cmd_list.append("rm -f /usr/sbin/%s" % i)
+            for j in cmd_list:
+                exec_shell_command(cmd=j, target_host=host)
 
+            os.system("scp %s/%s %s:/usr/bin/" % (current_dir, i, host))
+            os.system("scp %s/%s %s:/usr/sbin/" % (current_dir, i, host))
+            del cmd_list[:]
+            cmd_list.append("chmod 777 /usr/bin/%s" % i)
+            cmd_list.append("chmod 777 /usr/sbin/%s" % i)
+            for j in cmd_list:
+                exec_shell_command(cmd=j, target_host=host)
 
-    # netperf
-    if os.system("netperf -V 2>/dev/null 1>/dev/null") != 0:
-        cmd = ""
+    # local iperf3
+    del cmd_list[:]
+    cmd_list.append("rm -f /usr/bin/iperf3")
+    cmd_list.append("rm -f /usr/local/bin/iperf3")
+    cmd_list.append("rm -f /usr/local/lib/libiperf.so.0")
+    cmd_list.append("cp %s/iperf3 /usr/bin/iperf3" % current_dir)
+    cmd_list.append("cp %s/iperf3 /usr/local/bin/iperf3" % current_dir)
+    cmd_list.append("cp %s/libiperf.so.0 /usr/local/lib/libiperf.so.0" % current_dir)
+    cmd_list.append("chmod 777 /usr/bin/iperf3")
+    cmd_list.append("chmod 777 /usr/local/bin/iperf3")
+    for j in cmd_list:
+        exec_shell_command(cmd=j, target_host="")
+
+    # remote iperf3
+    del cmd_list[:]
+    cmd_list.append("rm -f /usr/bin/iperf3")
+    cmd_list.append("rm -f /usr/local/bin/iperf3")
+    cmd_list.append("rm -f /usr/local/lib/libiperf.so.0")
+    for j in cmd_list:
+        exec_shell_command(cmd=j, target_host=host)
+
+    os.system("scp %s/iperf3 %s:/usr/bin/" % (current_dir, host))
+    os.system("scp %s/iperf3 %s:/usr/local/bin/" % (current_dir, host))
+    os.system("scp %s/libiperf.so.0 %s:/usr/local/lib/" % (current_dir, host))
+    del cmd_list[:]
+    cmd_list.append("chmod 777 /usr/bin/iperf3")
+    cmd_list.append("chmod 777 /usr/local/bin/iperf3")
+    for j in cmd_list:
+        exec_shell_command(cmd=j, target_host=host)
+
+    # local memcached + memaslap
+    del cmd_list[:]
+    cmd_list.append("rm -f /usr/bin/memcached")
+    cmd_list.append("rm -f /usr/bin/memaslap")
+    cmd_list.append("rm -f /usr/lib64/libmemcached.so.11")
+    cmd_list.append("rm -f /usr/lib64/libevent-2.0.so.5")
+    cmd_list.append("cp %s/memcached /usr/bin/" % current_dir)
+    cmd_list.append("cp %s/memaslap /usr/bin/" % current_dir)
+    cmd_list.append("cp %s/libmemcached.so.11 /usr/lib64/" % current_dir)
+    cmd_list.append("cp %s/libevent-2.0.so.5 /usr/lib64/" % current_dir)
+    cmd_list.append("chmod 777 /usr/bin/memcached")
+    cmd_list.append("chmod 777 /usr/bin/memaslap")
+    for j in cmd_list:
+        exec_shell_command(cmd=j, target_host="")
+
+    # remote memcached + memaslap
+    del cmd_list[:]
+    cmd_list.append("rm -f /usr/bin/memcached")
+    cmd_list.append("rm -f /usr/bin/memaslap")
+    cmd_list.append("rm -f /usr/lib64/libmemcached.so.11")
+    cmd_list.append("rm -f /usr/lib64/libevent-2.0.so.5")
+    for j in cmd_list:
+        exec_shell_command(cmd=j, target_host=host)
+
+    os.system("scp %s/memcached %s:/usr/bin/" % (current_dir, host))
+    os.system("scp %s/memaslap %s:/usr/bin/" % (current_dir, host))
+    os.system("scp %s/libmemcached.so.11 %s:/usr/lib64/" % (current_dir, host))
+    os.system("scp %s/libevent-2.0.so.5 %s:/usr/lib64/" % (current_dir, host))
+    del cmd_list[:]
+    cmd_list.append("chmod 777 /usr/bin/memcached")
+    cmd_list.append("chmod 777 /usr/bin/memaslap")
+    for j in cmd_list:
+        exec_shell_command(cmd=j, target_host=host)
+
+    # c1000k local
+    del cmd_list[:]
+    cmd_list.append("rm -f %s/client" % os.getcwd())
+    cmd_list.append("rm -f %s/server" % os.getcwd())
+    cmd_list.append("cp %s/client %s/" % (current_dir, os.getcwd()))
+    cmd_list.append("cp %s/server %s/" % (current_dir, os.getcwd()))
+    cmd_list.append("chmod 777 %s/client" % os.getcwd())
+    cmd_list.append("chmod 777 %s/server" % os.getcwd())
+    for j in cmd_list:
+        exec_shell_command(cmd=j, target_host="")
+
+    # c1000k remote
+    del cmd_list[:]
+    cmd_list.append("rm -f /root/client")
+    cmd_list.append("rm -f /root/server")
+    for j in cmd_list:
+        exec_shell_command(cmd=j, target_host=host)
+
+    os.system("scp %s/client %s:/root/" % (current_dir, host))
+    os.system("scp %s/server %s:/root/" % (current_dir, host))
+    del cmd_list[:]
+    cmd_list.append("chmod 777 /root/client")
+    cmd_list.append("chmod 777 /root/server")
+    for j in cmd_list:
+        exec_shell_command(cmd=j, target_host=host)
+
+    # meinian udp local
+    if not os.path.isfile("/root/ConstructTest/Linux/client.sh"):
+        del cmd_list[:]
+        cmd_list.append("rm -rf /root/ConstructTest*")
+        cmd_list.append("cp %s/ConstructTest.zip /root/" % current_dir)
+        cmd_list.append("unzip /root/ConstructTest.zip -d /root/")
+        for j in cmd_list:
+            exec_shell_command(cmd=j, target_host="")
+
+    # remote
+    exec_shell_command(cmd="rm -f ConstructTest*", target_host=host)
+    del cmd_list[:]
+    os.system("scp %s/ConstructTest.zip %s:/root/" % (current_dir, host))
+    exec_shell_command(cmd="unzip /root/ConstructTest.zip /root/", target_host=host)
+
 
 # 函数功能：启动server
 def start_server():
-    pass
+    global host
+
+    current_dir = os.getcwd() + "/" + TOOLS_DIR
+    exec_shell_command(cmd="rm -f /root/run_scenario_server.sh", target_host=host)
+    os.system("scp %s/run_scenario_server.sh %s:/root/" % (current_dir, host))
+    exec_shell_command("ssh %s 'sh /root/run_scenario_server.sh &" % host)
 
 
 # 函数功能：测试空载ping延迟，返回(avg_let,loss_percent,send,recv)的列表
@@ -1210,13 +1385,13 @@ def run_multi_user_c1000k(serverip, flow=2, base_port=11000, many=1):
 
 ############  main函数入口  ############
 def main():
-    install_tools()
-    '''
     global host
     global TEST_TIME
     global TEST_MANY
     off()
-
+    set_ssh_key(host=host, key_value="huawei")
+    install_tools()
+    '''
     ret = run_ping(host, count=TEST_TIME, byte=64, interval=1, many=TEST_MANY)
     print_log(ret)
 
