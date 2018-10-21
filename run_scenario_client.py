@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # __author__ = 'c00406647'
 # version: v0.1
-# date: 2018-10-18
+# date: 2018-10-21
 
 
 import os
@@ -294,24 +294,30 @@ def install_tools():
         cmd_list.append("rm -rf /root/ConstructTest*")
         cmd_list.append("cp %s/ConstructTest.zip /root/" % current_dir)
         cmd_list.append("unzip /root/ConstructTest.zip -d /root/")
+        cmd_list.append("chmod 777 /root/ConstructTest/Linux/*.sh")
         for j in cmd_list:
             exec_shell_command(cmd=j, target_host="")
 
     # remote
-    exec_shell_command(cmd="rm -f ConstructTest*", target_host=host)
+    exec_shell_command(cmd="rm -rf ConstructTest*", target_host=host)
     del cmd_list[:]
     os.system("scp %s/ConstructTest.zip %s:/root/" % (current_dir, host))
-    exec_shell_command(cmd="unzip /root/ConstructTest.zip /root/", target_host=host)
+    exec_shell_command(cmd="unzip /root/ConstructTest.zip -d /root/", target_host=host)
+    exec_shell_command(cmd="chmod 777 /root/ConstructTest/Linux/*.sh", target_host=host)
 
 
 # 函数功能：启动server
 def start_server():
     global host
+    global LONG_SLEEP
 
     current_dir = os.getcwd() + "/" + TOOLS_DIR
+    print "dir=%s" % current_dir
     exec_shell_command(cmd="rm -f /root/run_scenario_server.sh", target_host=host)
     os.system("scp %s/run_scenario_server.sh %s:/root/" % (current_dir, host))
-    exec_shell_command("ssh %s 'sh /root/run_scenario_server.sh &" % host)
+    exec_shell_command("ssh %s 'sh /root/run_scenario_server.sh 2>/dev/null 1>/dev/null &' &" % host)
+    time.sleep(LONG_SLEEP)
+    print "start server done"
 
 
 # 函数功能：测试空载ping延迟，返回(avg_let,loss_percent,send,recv)的列表
@@ -889,7 +895,7 @@ def run_scp_speed(serverip, size=10240, many=1):
     sum_speed = 0
     for i in ret_value:
         if i[0] > 0:
-            sum_count += 0
+            sum_count += 1
             sum_speed += i[0]
 
     if sum_count > 0:
@@ -1048,7 +1054,7 @@ def run_multi_user_netperf_send_bandwidth(serverip, flow=16, base_port=7001, typ
     sum_bw = 0
     for i in ret_value:
         if i[0] > 0:
-            sum_count += 0
+            sum_count += 1
             sum_bw += i[0]
 
     if sum_count > 0:
@@ -1391,6 +1397,7 @@ def main():
     off()
     set_ssh_key(host=host, key_value="huawei")
     install_tools()
+    start_server()
     '''
     ret = run_ping(host, count=TEST_TIME, byte=64, interval=1, many=TEST_MANY)
     print_log(ret)
@@ -1418,7 +1425,7 @@ def main():
     ret = run_one_memcached(host, port=22122, test_time=TEST_TIME, threads=16, concurrency=256, byte=100, many=TEST_MANY)
     print_log(ret)
 
-    ret = run_scp_speed(host, size=1024, many=TEST_MANY)
+    ret = run_scp_speed(host, size=10240, many=TEST_MANY)
     print_log(ret)
 
     ret = run_meinian_udp_check(host, check_num=20, many=TEST_MANY)
