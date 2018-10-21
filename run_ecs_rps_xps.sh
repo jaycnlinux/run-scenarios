@@ -1,4 +1,5 @@
 #!/bin/bash
+# modify date: 2018-10-21
 # This is the default setting of networking multiqueue and RPS/XPS/RFS on ECS.
 # 1. enable multiqueue if available
 # 2. enable RPS/XPS optimization
