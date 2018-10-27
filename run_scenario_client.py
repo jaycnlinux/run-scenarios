@@ -19,6 +19,7 @@ ERROR = -1
 SUCCESS = 0
 LOG_TIME = time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime(time.time()))
 LOG_FILE = "./%s.log" % LOG_TIME
+DEFAULT_PASSWORD = "Huawei@123"
 host = "192.168.1.74"
 TEST_TIME = 120
 TEST_MANY = 5
@@ -29,19 +30,21 @@ TOOLS_DIR = "tools"
 
 
 # 函数功能：打印到日志
-def print_log(content):
+def print_log(content, print_screen=True):
     """
     #函数功能：打印到日志
     :param content: 打印的内容，可以为字符串，也可以为列表，元组
+    :param print_screen: 是否屏幕显示
     """
     global LOG_FILE
     if content:
         f = open(LOG_FILE, 'a+')
         try:
-            print str(content)
+            if print_screen:
+                print str(content)
             f.write(str(content)+"\n")
             f.close()
-        except Exception:
+        except:
             f.close()
 
 
@@ -97,7 +100,7 @@ def off():
 
 
 # 函数功能：建立SSH信任关系
-def set_ssh_key(host, key_type="password", key_value="Huawei@123"):
+def set_ssh_key(host, key_type="password", key_value=DEFAULT_PASSWORD):
     """
     # 函数功能：建立SSH信任关系
     :param host:
@@ -298,10 +301,10 @@ def install_tools():
             exec_shell_command(cmd=j, target_host="")
 
     # remote
-    exec_shell_command(cmd="rm -f ConstructTest*", target_host=host)
+    exec_shell_command(cmd="rm -rf ConstructTest*", target_host=host)
     del cmd_list[:]
     os.system("scp %s/ConstructTest.zip %s:/root/" % (current_dir, host))
-    exec_shell_command(cmd="unzip /root/ConstructTest.zip /root/", target_host=host)
+    exec_shell_command(cmd="unzip /root/ConstructTest.zip -d /root/", target_host=host)
 
 
 # 函数功能：启动server
@@ -311,7 +314,8 @@ def start_server():
     current_dir = os.getcwd() + "/" + TOOLS_DIR
     exec_shell_command(cmd="rm -f /root/run_scenario_server.sh", target_host=host)
     os.system("scp %s/run_scenario_server.sh %s:/root/" % (current_dir, host))
-    exec_shell_command("ssh %s 'sh /root/run_scenario_server.sh &" % host)
+    exec_shell_command("ssh %s 'sh /root/run_scenario_server.sh' &" % host)
+    time.sleep(LONG_SLEEP)
 
 
 # 函数功能：测试空载ping延迟，返回(avg_let,loss_percent,send,recv)的列表
@@ -348,7 +352,7 @@ def run_ping(serverip, count=60, byte=64, interval=1.0, many=1):
         return ret_value, sum_result
 
     for i in range(1, many+1):
-        print_log("Round: %d" % i)
+        print_log("Round: %d/%d" % (i, many))
         pkt_send = -1
         pkt_recv = -1
         pkt_loss_percent = 0
@@ -450,7 +454,7 @@ def run_qperf(serverip, test_time=60, byte=64, test_type="udp_lat", many=1):
         return ret_value, sum_result
 
     for i in range(1, many+1):
-        print_log("Round: %d" % i)
+        print_log("Round: %d/%d" % (i, many))
         qperf_lat = -1
         f = os.popen(cmd)
         tmp_ret = f.readlines()
@@ -506,6 +510,7 @@ def run_one_netperf(serverip, port=12865, test_type="TCP_STREAM", test_time=60, 
 
     # 全局变量
     global LONG_SLEEP
+    global HUGE_SLEEP
     # 局部变量
     ret_value = []
     sum_result = {}
@@ -539,7 +544,7 @@ def run_one_netperf(serverip, port=12865, test_type="TCP_STREAM", test_time=60, 
 
     print_log(cmd)
     for i in range(1, many+1):
-        print_log("Round: %d" % i)
+        print_log("Round: %d/%d" % (i, many))
         tx_bw = -1
         rx_bw = -1
         tcp_rr = -1
@@ -549,6 +554,7 @@ def run_one_netperf(serverip, port=12865, test_type="TCP_STREAM", test_time=60, 
             f = os.popen(cmd)
             tmp_ret = f.readlines()
             f.close()
+            print_log(tmp_ret, print_screen=False)
             # 输出正常
             if test_type == "TCP_STREAM":
                 tx_str = tmp_ret[-1].split()
@@ -585,7 +591,10 @@ def run_one_netperf(serverip, port=12865, test_type="TCP_STREAM", test_time=60, 
 
         # 多次测试之间停留xx seconds
         if i < many:
-            time.sleep(LONG_SLEEP)
+            if str.upper(test_type) == "TCP_CRR":
+                time.sleep(HUGE_SLEEP)
+            else:
+                time.sleep(LONG_SLEEP)
 
     # 结果分析
     sum_count = 0
@@ -677,7 +686,7 @@ def run_one_ab(serverip, port=80, page="/", user_num=100, total_count=5000000, m
         return ret_value, sum_result
 
     for i in range(1, many + 1):
-        print_log("Round: %d" % i)
+        print_log("Round: %d/%d" % (i, many))
         f = os.popen(cmd)
         tmp_ret = f.readlines()
         f.close()
@@ -767,7 +776,7 @@ def run_one_memcached(serverip, port=11211, test_time=60, threads=16, concurrenc
     # 打印表头
     print_task_name("one user memcached")
     cmd = "memaslap -s %s:%d -t %ds -T %d -c %d -X %dB" % (serverip, port, test_time, threads, concurrency, byte)
-
+    print_log(cmd)
     # 判断memaslap是否存在
     if os.system("memaslap -V 2>/dev/null 1>/dev/null") != 0:
         sum_result["success"] = 0
@@ -776,7 +785,7 @@ def run_one_memcached(serverip, port=11211, test_time=60, threads=16, concurrenc
         return ret_value, sum_result
 
     for i in range(1, many + 1):
-        print_log("Round: %d\tcmd=%s" % (i, cmd))
+        print_log("Round: %d/%d" % (i, many))
         f = os.popen(cmd)
         tmp_ret = f.readlines()
         f.close()
@@ -843,7 +852,7 @@ def run_scp_speed(serverip, size=10240, many=1):
     print_log(cmd)
 
     for i in range(1, many + 1):
-        print_log("Round: %d" % i)
+        print_log("Round: %d/%d" % (i, many))
         tmp_file = "/tmp/scp.log"
         os.system("rm -f %s" % tmp_file)
 
@@ -889,7 +898,7 @@ def run_scp_speed(serverip, size=10240, many=1):
     sum_speed = 0
     for i in ret_value:
         if i[0] > 0:
-            sum_count += 0
+            sum_count += 1
             sum_speed += i[0]
 
     if sum_count > 0:
@@ -918,7 +927,7 @@ def run_meinian_udp_check(serverip, check_num=20, many=1):
     # 打印表头
     print_task_name("meinian UDP check")
     cmd = "sh /root/ConstructTest/Linux/client.sh %s" % serverip
-
+    print_log(cmd)
     # 判断程序是否存在
     if not os.path.isfile("/root/ConstructTest/Linux/client.sh"):
         sum_result["success"] = 0
@@ -927,7 +936,7 @@ def run_meinian_udp_check(serverip, check_num=20, many=1):
         return ret_value, sum_result
 
     for i in range(1, many + 1):
-        print_log("Round: %d\tcmd=%s" % (i, cmd))
+        print_log("Round: %d/%d" % (i, many))
 
         os.system("rm -f ./TestReport.txt 2>&1 > /dev/null")
         os.system(cmd + " 2>&1 > /dev/null")
@@ -1009,7 +1018,7 @@ def run_multi_user_netperf_send_bandwidth(serverip, flow=16, base_port=7001, typ
         return ret_value, sum_result
 
     for i in range(1, many+1):
-        print_log("Round: %d" % i)
+        print_log("Round: %d/%d" % (i, many))
         tcp_bw = -1
         for j in range(1, flow+1):
             port = base_port + j - 1
@@ -1092,7 +1101,7 @@ def run_multi_user_tcp_rr(serverip, flow=16, base_port=7001, test_type="TCP_RR",
         return ret_value, sum_result
 
     for i in range(1, many + 1):
-        print_log("Round: %d" % i)
+        print_log("Round: %d/%d" % (i, many))
         tcp_rr = 0
 
         try:
@@ -1164,9 +1173,11 @@ def run_multi_user_tcp_crr(serverip, flow=16, base_port=7001, type="TCP_CRR", te
         print "ERROR: netperf not exist"
         return ret_value, sum_result
 
+    cmd = "netperf %s %d flow" % (type, flow)
+    print_log(cmd)
     for i in range(1, many + 1):
         cmd = "netperf %s %d flow" % (type, flow)
-        print_log("Round: %d\tcmd=%s" % (i, cmd))
+        print_log("Round: %d/%d" % (i, many))
         tcp_crr = 0
 
         #临时文件
@@ -1243,7 +1254,7 @@ def run_multi_user_memcached(serverip, base_port=9001, flow=4, test_time=60, thr
 
     for i in range(1, many + 1):
         cmd = "memcached %d flow" % flow
-        print_log("Round: %d\tcmd=%s" % (i, cmd))
+        print_log("Round: %d/%d" % (i, many))
         tps = 0
 
         # 临时文件
@@ -1322,7 +1333,7 @@ def run_multi_user_c1000k(serverip, flow=2, base_port=11000, many=1):
         return ret_value, sum_result
 
     for i in range(1, many + 1):
-        print_log("Round: %d\tcmd=%s" % (i, cmd))
+        print_log("Round: %d/%d" % (i, many))
 
         # 执行c1000k测试
         for j in range(1, flow + 1):
@@ -1386,11 +1397,13 @@ def run_multi_user_c1000k(serverip, flow=2, base_port=11000, many=1):
 ############  main函数入口  ############
 def main():
     global host
+    global DEFAULT_PASSWORD
     global TEST_TIME
     global TEST_MANY
     off()
-    set_ssh_key(host=host, key_value="huawei")
+    set_ssh_key(host=host, key_value=DEFAULT_PASSWORD)
     install_tools()
+    start_server()
     '''
     ret = run_ping(host, count=TEST_TIME, byte=64, interval=1, many=TEST_MANY)
     print_log(ret)
