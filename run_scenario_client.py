@@ -30,22 +30,30 @@ TOOLS_DIR = "tools"
 
 
 # 函数功能：打印到日志
-def print_log(content, print_screen=True):
+def print_log(content, print_screen=True, new_line=True):
     """
     #函数功能：打印到日志
     :param content: 打印的内容，可以为字符串，也可以为列表，元组
     :param print_screen: 是否屏幕显示
     """
     global LOG_FILE
-    if content:
-        f = open(LOG_FILE, 'a+')
-        try:
+
+    f = open(LOG_FILE, 'a+')
+    try:
+        # 换行
+        if new_line:
             if print_screen:
                 print str(content)
             f.write(str(content)+"\n")
-            f.close()
-        except:
-            f.close()
+        # 不换行
+        else:
+            if print_screen:
+                print str(content),
+            f.write(str(content))
+    except:
+        pass
+
+    f.close()
 
 
 # 函数功能：打印测试任务名称
@@ -589,7 +597,7 @@ def run_one_netperf(serverip, port=12865, test_type="TCP_STREAM", test_time=60, 
         udp_rr = round(udp_rr)
         ret_value.append((tx_bw, rx_bw, tcp_rr, tcp_crr, udp_rr,))
 
-        # 多次测试之间停留xx seconds
+        # 多次测试之间停留xx seconds，如果是TCP_CRR，需要等连接数老化再测
         if i < many:
             if str.upper(test_type) == "TCP_CRR":
                 time.sleep(HUGE_SLEEP)
@@ -744,7 +752,6 @@ def run_one_ab(serverip, port=80, page="/", user_num=100, total_count=5000000, m
     if sum_count > 0:
         sum_rps = round(sum_rps/sum_count)
         sum_time = round(sum_time/sum_count)
-        sum_longest = longest_time
 
     sum_result["success"] = sum_count
     sum_result["rps"] = sum_rps
@@ -936,7 +943,7 @@ def run_meinian_udp_check(serverip, check_num=20, many=1):
         return ret_value, sum_result
 
     for i in range(1, many + 1):
-        print_log("Round: %d/%d" % (i, many))
+        print_log("Round: %d/%d" % (i, many), print_screen=True, new_line=False)
 
         os.system("rm -f ./TestReport.txt 2>&1 > /dev/null")
         os.system(cmd + " 2>&1 > /dev/null")
@@ -954,8 +961,9 @@ def run_meinian_udp_check(serverip, check_num=20, many=1):
                     break
                 udp_str = line.split(" ")
                 tmp_count += float(udp_str[-2])
-                print udp_str[-2],
+                print_log(udp_str[-2], print_screen=True, new_line=False)
 
+        print_log("", print_screen=True,new_line=True)
         # 结束meinian udp任务
         shutdown_process("ConstructTestClient")
         time.sleep(30)
@@ -1057,7 +1065,7 @@ def run_multi_user_netperf_send_bandwidth(serverip, flow=16, base_port=7001, typ
     sum_bw = 0
     for i in ret_value:
         if i[0] > 0:
-            sum_count += 0
+            sum_count += 1
             sum_bw += i[0]
 
     if sum_count > 0:
