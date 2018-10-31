@@ -9,8 +9,7 @@ import os
 import subprocess
 import time
 import pexpect
-
-
+import shutil
 from datetime import datetime as datetime
 
 
@@ -183,26 +182,15 @@ def install_tools():
     for i in soft_list:
         # 如果不存在则安装,local
         if exec_shell_command("/usr/bin/%s -V" % i, target_host="") != 0:
-            del cmd_list[:]
-            cmd_list.append("rm -f /usr/bin/%s" % i)
-            cmd_list.append("rm -f /usr/sbin/%s" % i)
-            cmd_list.append("cp %s/%s /usr/bin/" % (current_dir, i))
-            cmd_list.append("cp %s/%s /usr/sbin/" % (current_dir, i))
-            cmd_list.append("chmod 777 /usr/bin/%s" % i)
-            cmd_list.append("chmod 777 /usr/sbin/%s" % i)
-            for j in cmd_list:
-                exec_shell_command(cmd=j, target_host="")
+            shutil.copy("%s/%s" % (current_dir, i), "/usr/bin")
+            shutil.copy("%s/%s" % (current_dir, i), "/usr/sbin")
+            os.chmod("/usr/bin/%s" % i, 0o777)
+            os.chmod("/usr/sbin/%s" % i, 0o777)
 
         # remote
         if exec_shell_command("/usr/bin/%s -V" % i, target_host=host) != 0:
-            del cmd_list[:]
-            cmd_list.append("rm -f /usr/bin/%s" % i)
-            cmd_list.append("rm -f /usr/sbin/%s" % i)
-            for j in cmd_list:
-                exec_shell_command(cmd=j, target_host=host)
-
-            os.system("scp %s/%s %s:/usr/bin/" % (current_dir, i, host))
-            os.system("scp %s/%s %s:/usr/sbin/" % (current_dir, i, host))
+            os.system("script -q -c 'scp %s/%s %s:/usr/bin/' > /dev/null" % (current_dir, i, host))
+            os.system("script -q -c 'scp %s/%s %s:/usr/sbin/' > /dev/null" % (current_dir, i, host))
             del cmd_list[:]
             cmd_list.append("chmod 777 /usr/bin/%s" % i)
             cmd_list.append("chmod 777 /usr/sbin/%s" % i)
@@ -211,16 +199,11 @@ def install_tools():
 
     # local iperf3
     del cmd_list[:]
-    cmd_list.append("rm -f /usr/bin/iperf3")
-    cmd_list.append("rm -f /usr/local/bin/iperf3")
-    cmd_list.append("rm -f /usr/local/lib/libiperf.so.0")
-    cmd_list.append("cp %s/iperf3 /usr/bin/iperf3" % current_dir)
-    cmd_list.append("cp %s/iperf3 /usr/local/bin/iperf3" % current_dir)
-    cmd_list.append("cp %s/libiperf.so.0 /usr/local/lib/libiperf.so.0" % current_dir)
-    cmd_list.append("chmod 777 /usr/bin/iperf3")
-    cmd_list.append("chmod 777 /usr/local/bin/iperf3")
-    for j in cmd_list:
-        exec_shell_command(cmd=j, target_host="")
+    shutil.copy("%s/iperf3" % current_dir, "/usr/bin/")
+    shutil.copy("%s/iperf3" % current_dir, "/usr/local/bin/")
+    shutil.copy("%s/libiperf.so.0" % current_dir, "/usr/local/lib/libiperf.so.0")
+    os.chmod("/usr/bin/iperf3", 0o777)
+    os.chmod("/usr/local/bin/iperf3", 0o777)
 
     # remote iperf3
     del cmd_list[:]
@@ -360,7 +343,7 @@ def run_ping(serverip, count=60, byte=64, interval=1.0, many=1):
         return ret_value, sum_result
 
     for i in range(1, many+1):
-        print_log("Round: %d/%d" % (i, many))
+        print_log("Round: %d/%d" % (i, many), print_screen=True, new_line=False)
         pkt_send = -1
         pkt_recv = -1
         pkt_loss_percent = 0
@@ -394,8 +377,8 @@ def run_ping(serverip, count=60, byte=64, interval=1.0, many=1):
         # 格式化处理
         avg_lat = round(avg_lat, 3)
         pkt_loss_percent = round(pkt_loss_percent, 2)
-
         ret_value.append((avg_lat, pkt_loss_percent, pkt_send, pkt_recv))
+        print_log(avg_lat, print_screen=True, new_line=True)
 
         # 多次测试之间等待间隔
         if i < many:
@@ -1165,7 +1148,9 @@ def run_multi_user_tcp_crr(serverip, flow=16, base_port=7001, type="TCP_CRR", te
     :param byte: 测试包长
     :param many: 测试次数
     """
-    #局部变量
+    # 全局变量
+    global LOG_TIME
+    # 局部变量
     ret_value = []
     sum_result = {}
     tcp_crr = -1
@@ -1189,12 +1174,12 @@ def run_multi_user_tcp_crr(serverip, flow=16, base_port=7001, type="TCP_CRR", te
         tcp_crr = 0
 
         #临时文件
-        tmp_prefix = "/tmp/netperf_crr_"
+        tmp_prefix = "/tmp/%s_%dnetperf_crr_" % (LOG_TIME, i)
         cmd = "rm -f %s* 2>&1 > /dev/null" % (tmp_prefix)
         os.system(cmd)
 
         for j in range(1, flow+1):
-            port = base_port + j -1
+            port = base_port + j - 1
             cmd = "netperf -H %s -p %d -t %s -l %d -- -r %d 2>&1 > %s%d.log &" \
                    % (serverip, port, type, test_time, byte, tmp_prefix, port)
             os.system(cmd)
@@ -1214,16 +1199,16 @@ def run_multi_user_tcp_crr(serverip, flow=16, base_port=7001, type="TCP_CRR", te
             except:
                 tcp_crr += 0
 
-        #数据格式化
+        # 数据格式化
         tcp_crr = round(tcp_crr)
         ret_value.append((tcp_crr,))
 
-        #清理临时文件
+        # 清理临时文件
         time.sleep(2)
-        cmd = "rm -f %s* 2>&1 > /dev/null" % tmp_prefix
-        os.system(cmd)
+        # cmd = "rm -f %s* 2>&1 > /dev/null" % tmp_prefix
+        # os.system(cmd)
 
-        #多次测试之间停留10s
+        # 多次测试之间停留10s
         if i < many:
             time.sleep(60)
 
@@ -1270,7 +1255,7 @@ def run_multi_user_memcached(serverip, base_port=9001, flow=4, test_time=60, thr
         cmd = "rm -f %s* 2>&1 > /dev/null" % (tmp_prefix)
         os.system(cmd)
 
-        #发送测试命令
+        # 发送测试命令
         for j in range(1, flow+1):
             port = base_port + j -1
             tmp_file = "%s%d.log" % (tmp_prefix, port)
@@ -1278,15 +1263,15 @@ def run_multi_user_memcached(serverip, base_port=9001, flow=4, test_time=60, thr
                   % (serverip, port, test_time, threads, concurrency, byte, tmp_file)
             os.system(cmd)
 
-        #等待结束
+        # 等待结束
         time.sleep(test_time+10)
 
-        #采集结果
+        # 采集结果
         for j in range(1, flow+1):
             port = base_port + j - 1
             tmp_file = "%s%d.log" % (tmp_prefix, port)
 
-            #只有当文件存在时，才读取
+            # 只有当文件存在时，才读取
             if os.path.isfile(tmp_file):
                 f = open(tmp_file)
                 tmp_ret = f.read().strip().splitlines()
