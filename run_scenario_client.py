@@ -47,8 +47,8 @@ def print_log(content, print_screen=True, new_line=True):
         # 不换行
         else:
             if print_screen:
-                print str(content),
-            f.write(str(content))
+                print str(content)+"  ",
+            f.write(str(content)+"  ")
     except:
         pass
 
@@ -189,8 +189,8 @@ def install_tools():
 
         # remote
         if exec_shell_command("/usr/bin/%s -V" % i, target_host=host) != 0:
-            os.system("script -q -c 'scp %s/%s %s:/usr/bin/' > /dev/null" % (current_dir, i, host))
-            os.system("script -q -c 'scp %s/%s %s:/usr/sbin/' > /dev/null" % (current_dir, i, host))
+            os.system("script -q -c 'scp %s/%s %s:/usr/bin/' >/dev/null" % (current_dir, i, host))
+            os.system("script -q -c 'scp %s/%s %s:/usr/sbin/' >/dev/null" % (current_dir, i, host))
             del cmd_list[:]
             cmd_list.append("chmod 777 /usr/bin/%s" % i)
             cmd_list.append("chmod 777 /usr/sbin/%s" % i)
@@ -206,16 +206,9 @@ def install_tools():
     os.chmod("/usr/local/bin/iperf3", 0o777)
 
     # remote iperf3
-    del cmd_list[:]
-    cmd_list.append("rm -f /usr/bin/iperf3")
-    cmd_list.append("rm -f /usr/local/bin/iperf3")
-    cmd_list.append("rm -f /usr/local/lib/libiperf.so.0")
-    for j in cmd_list:
-        exec_shell_command(cmd=j, target_host=host)
-
-    os.system("scp %s/iperf3 %s:/usr/bin/" % (current_dir, host))
-    os.system("scp %s/iperf3 %s:/usr/local/bin/" % (current_dir, host))
-    os.system("scp %s/libiperf.so.0 %s:/usr/local/lib/" % (current_dir, host))
+    os.system("script -q -c 'scp %s/iperf3 %s:/usr/bin/' >/dev/null" % (current_dir, host))
+    os.system("script -q -c 'scp %s/iperf3 %s:/usr/local/bin/' >/dev/null" % (current_dir, host))
+    os.system("script -q -c 'scp %s/libiperf.so.0 %s:/usr/local/lib/' >/dev/null" % (current_dir, host))
     del cmd_list[:]
     cmd_list.append("chmod 777 /usr/bin/iperf3")
     cmd_list.append("chmod 777 /usr/local/bin/iperf3")
@@ -223,33 +216,19 @@ def install_tools():
         exec_shell_command(cmd=j, target_host=host)
 
     # local memcached + memaslap
-    del cmd_list[:]
-    cmd_list.append("rm -f /usr/bin/memcached")
-    cmd_list.append("rm -f /usr/bin/memaslap")
-    cmd_list.append("rm -f /usr/lib64/libmemcached.so.11")
-    cmd_list.append("rm -f /usr/lib64/libevent-2.0.so.5")
-    cmd_list.append("cp %s/memcached /usr/bin/" % current_dir)
-    cmd_list.append("cp %s/memaslap /usr/bin/" % current_dir)
-    cmd_list.append("cp %s/libmemcached.so.11 /usr/lib64/" % current_dir)
-    cmd_list.append("cp %s/libevent-2.0.so.5 /usr/lib64/" % current_dir)
-    cmd_list.append("chmod 777 /usr/bin/memcached")
-    cmd_list.append("chmod 777 /usr/bin/memaslap")
-    for j in cmd_list:
-        exec_shell_command(cmd=j, target_host="")
+    shutil.copy("%s/memcached" % current_dir, "/usr/bin/")
+    shutil.copy("%s/memaslap" % current_dir, "/usr/bin/")
+    shutil.copy("%s/libmemcached.so.11" % current_dir, "/usr/lib64/")
+    shutil.copy("%s/libevent-2.0.so.5" % current_dir, "/usr/lib64/")
+    os.chmod("/usr/bin/memcached", 0o777)
+    os.chmod("/usr/bin/memaslap", 0o777)
 
     # remote memcached + memaslap
     del cmd_list[:]
-    cmd_list.append("rm -f /usr/bin/memcached")
-    cmd_list.append("rm -f /usr/bin/memaslap")
-    cmd_list.append("rm -f /usr/lib64/libmemcached.so.11")
-    cmd_list.append("rm -f /usr/lib64/libevent-2.0.so.5")
-    for j in cmd_list:
-        exec_shell_command(cmd=j, target_host=host)
-
-    os.system("scp %s/memcached %s:/usr/bin/" % (current_dir, host))
-    os.system("scp %s/memaslap %s:/usr/bin/" % (current_dir, host))
-    os.system("scp %s/libmemcached.so.11 %s:/usr/lib64/" % (current_dir, host))
-    os.system("scp %s/libevent-2.0.so.5 %s:/usr/lib64/" % (current_dir, host))
+    os.system("script -q -c 'scp %s/memcached %s:/usr/bin/' >/dev/null" % (current_dir, host))
+    os.system("script -q -c 'scp %s/memaslap %s:/usr/bin/' >/dev/null" % (current_dir, host))
+    os.system("script -q -c 'scp %s/libmemcached.so.11 %s:/usr/lib64/' >/dev/null" % (current_dir, host))
+    os.system("script -q -c 'scp %s/libevent-2.0.so.5 %s:/usr/lib64/' >/dev/null" % (current_dir, host))
     del cmd_list[:]
     cmd_list.append("chmod 777 /usr/bin/memcached")
     cmd_list.append("chmod 777 /usr/bin/memaslap")
@@ -257,25 +236,14 @@ def install_tools():
         exec_shell_command(cmd=j, target_host=host)
 
     # c1000k local
-    del cmd_list[:]
-    cmd_list.append("rm -f %s/client" % os.getcwd())
-    cmd_list.append("rm -f %s/server" % os.getcwd())
-    cmd_list.append("cp %s/client %s/" % (current_dir, os.getcwd()))
-    cmd_list.append("cp %s/server %s/" % (current_dir, os.getcwd()))
-    cmd_list.append("chmod 777 %s/client" % os.getcwd())
-    cmd_list.append("chmod 777 %s/server" % os.getcwd())
-    for j in cmd_list:
-        exec_shell_command(cmd=j, target_host="")
+    shutil.copy("%s/client" % current_dir, os.getcwd())
+    shutil.copy("%s/server" % current_dir, os.getcwd())
+    os.chmod("%s/client" % os.getcwd(), 0o777)
+    os.chmod("%s/server" % os.getcwd(), 0o777)
 
     # c1000k remote
-    del cmd_list[:]
-    cmd_list.append("rm -f /root/client")
-    cmd_list.append("rm -f /root/server")
-    for j in cmd_list:
-        exec_shell_command(cmd=j, target_host=host)
-
-    os.system("scp %s/client %s:/root/" % (current_dir, host))
-    os.system("scp %s/server %s:/root/" % (current_dir, host))
+    os.system("script -q -c 'scp %s/client %s:/root/' >/dev/null" % (current_dir, host))
+    os.system("script -q -c 'scp %s/server %s:/root/' >/dev/null" % (current_dir, host))
     del cmd_list[:]
     cmd_list.append("chmod 777 /root/client")
     cmd_list.append("chmod 777 /root/server")
@@ -283,7 +251,7 @@ def install_tools():
         exec_shell_command(cmd=j, target_host=host)
 
     # meinian udp local
-    if not os.path.isfile("/root/ConstructTest/Linux/client.sh"):
+    if os.path.isfile("%s/ConstructTest.zip" % current_dir):
         del cmd_list[:]
         cmd_list.append("rm -rf /root/ConstructTest*")
         cmd_list.append("cp %s/ConstructTest.zip /root/" % current_dir)
@@ -292,10 +260,11 @@ def install_tools():
             exec_shell_command(cmd=j, target_host="")
 
     # remote
-    exec_shell_command(cmd="rm -rf ConstructTest*", target_host=host)
-    del cmd_list[:]
-    os.system("scp %s/ConstructTest.zip %s:/root/" % (current_dir, host))
-    exec_shell_command(cmd="unzip /root/ConstructTest.zip -d /root/", target_host=host)
+    if os.path.isfile("%s/ConstructTest.zip" % current_dir):
+        exec_shell_command(cmd="rm -rf ConstructTest*", target_host=host)
+        del cmd_list[:]
+        os.system("script -q -c 'scp %s/ConstructTest.zip %s:/root/' >/dev/null" % (current_dir, host))
+        exec_shell_command(cmd="unzip /root/ConstructTest.zip -d /root/", target_host=host)
 
 
 # 函数功能：启动server
@@ -303,8 +272,10 @@ def start_server():
     global host
 
     current_dir = os.getcwd() + "/" + TOOLS_DIR
-    exec_shell_command(cmd="rm -f /root/run_scenario_server.sh", target_host=host)
-    os.system("scp %s/run_scenario_server.sh %s:/root/" % (current_dir, host))
+    if os.path.isfile("%s/run_scenario_server.sh" % current_dir):
+        exec_shell_command(cmd="rm -f /root/run_scenario_server.sh", target_host=host)
+        os.system("script -q -c 'scp %s/run_scenario_server.sh %s:/root/' >/dev/null" % (current_dir, host))
+
     exec_shell_command("ssh %s 'sh /root/run_scenario_server.sh' &" % host)
     time.sleep(LONG_SLEEP)
 
@@ -412,7 +383,7 @@ def run_ping(serverip, count=60, byte=64, interval=1.0, many=1):
     sum_result["send"] = sum_send
     sum_result["recv"] = sum_recv
 
-    return ret_value, sum_result
+    return sum_result
 
 
 # 函数功能：测试qperf，返回qperf延迟的列表
@@ -445,7 +416,7 @@ def run_qperf(serverip, test_time=60, byte=64, test_type="udp_lat", many=1):
         return ret_value, sum_result
 
     for i in range(1, many+1):
-        print_log("Round: %d/%d" % (i, many))
+        print_log("Round: %d/%d" % (i, many), print_screen=True, new_line=False)
         qperf_lat = -1
         f = os.popen(cmd)
         tmp_ret = f.readlines()
@@ -462,6 +433,7 @@ def run_qperf(serverip, test_time=60, byte=64, test_type="udp_lat", many=1):
         # 格式化处理
         qperf_lat = round(qperf_lat, 1)
         ret_value.append((qperf_lat,))
+        print_log(qperf_lat, print_screen=True, new_line=True)
 
         # 多次测试之间等待间隔
         if i < many:
@@ -484,7 +456,7 @@ def run_qperf(serverip, test_time=60, byte=64, test_type="udp_lat", many=1):
     sum_result["byte"] = byte
     sum_result["qperf(us)"] = sum_qperf
 
-    return ret_value, sum_result
+    return sum_result
 
 
 # 函数功能：测试单流netperf,UDP_STREAM,TCP_STREAM,TCP_RR,TCP_CRR,UDP_RR
@@ -535,7 +507,7 @@ def run_one_netperf(serverip, port=12865, test_type="TCP_STREAM", test_time=60, 
 
     print_log(cmd)
     for i in range(1, many+1):
-        print_log("Round: %d/%d" % (i, many))
+        print_log("Round: %d/%d" % (i, many), print_screen=True, new_line=False)
         tx_bw = -1
         rx_bw = -1
         tcp_rr = -1
@@ -579,6 +551,7 @@ def run_one_netperf(serverip, port=12865, test_type="TCP_STREAM", test_time=60, 
         tcp_crr = round(tcp_crr)
         udp_rr = round(udp_rr)
         ret_value.append((tx_bw, rx_bw, tcp_rr, tcp_crr, udp_rr,))
+        print_log((tx_bw, rx_bw, tcp_rr, tcp_crr, udp_rr), print_screen=True, new_line=True)
 
         # 多次测试之间停留xx seconds，如果是TCP_CRR，需要等连接数老化再测
         if i < many:
@@ -641,7 +614,7 @@ def run_one_netperf(serverip, port=12865, test_type="TCP_STREAM", test_time=60, 
             sum_udp_rr = round(sum_udp_rr/sum_count)
             sum_result["udp_rr"] = sum_udp_rr
 
-    return ret_value, sum_result
+    return sum_result
 
 
 # 函数功能：测试ab -c 100 -n 5000000，获取RPS、avg time、100%time
@@ -677,7 +650,7 @@ def run_one_ab(serverip, port=80, page="/", user_num=100, total_count=5000000, m
         return ret_value, sum_result
 
     for i in range(1, many + 1):
-        print_log("Round: %d/%d" % (i, many))
+        print_log("Round: %d/%d" % (i, many), print_screen=True, new_line=False)
         f = os.popen(cmd)
         tmp_ret = f.readlines()
         f.close()
@@ -713,6 +686,7 @@ def run_one_ab(serverip, port=80, page="/", user_num=100, total_count=5000000, m
         avg_time = round(avg_time)
         longest_time = round(longest_time)
         ret_value.append((rps, avg_time, longest_time,))
+        print_log((rps, avg_time, longest_time,), print_screen=True, new_line=True)
 
         # 多次测试之间测试等待
         if i < many:
@@ -741,7 +715,7 @@ def run_one_ab(serverip, port=80, page="/", user_num=100, total_count=5000000, m
     sum_result["time(ms)"] = sum_time
     sum_result["longest(ms)"] = sum_longest
 
-    return ret_value, sum_result
+    return sum_result
 
 
 # 函数功能：测试memcached单流TPS
@@ -775,7 +749,7 @@ def run_one_memcached(serverip, port=11211, test_time=60, threads=16, concurrenc
         return ret_value, sum_result
 
     for i in range(1, many + 1):
-        print_log("Round: %d/%d" % (i, many))
+        print_log("Round: %d/%d" % (i, many), print_screen=True, new_line=True)
         f = os.popen(cmd)
         tmp_ret = f.readlines()
         f.close()
@@ -794,6 +768,7 @@ def run_one_memcached(serverip, port=11211, test_time=60, threads=16, concurrenc
         # 数据处理
         tps = round(tps)
         ret_value.append((tps,))
+        print_log(tps, print_screen=True, new_line=True)
 
         # 多次测试之间等待
         if i < many:
@@ -815,7 +790,7 @@ def run_one_memcached(serverip, port=11211, test_time=60, threads=16, concurrenc
     sum_result["byte"] = byte
     sum_result["tps"] = sum_tps
 
-    return ret_value, sum_result
+    return sum_result
 
 
 # 函数功能：scp 10G文件速率测试
@@ -842,12 +817,12 @@ def run_scp_speed(serverip, size=10240, many=1):
     print_log(cmd)
 
     for i in range(1, many + 1):
-        print_log("Round: %d/%d" % (i, many))
+        print_log("Round: %d/%d" % (i, many), print_screen=True, new_line=False)
         tmp_file = "/tmp/scp.log"
         os.system("rm -f %s" % tmp_file)
 
         copy_speed = -1
-        cmd_shell = "script -q %s -c '%s'" % (tmp_file, cmd)
+        cmd_shell = "script -q %s -c '%s' >/dev/null" % (tmp_file, cmd)
         os.system(cmd_shell)
         f = open(tmp_file)
         tmp_ret = f.read().splitlines()
@@ -879,6 +854,8 @@ def run_scp_speed(serverip, size=10240, many=1):
             copy_speed = -1
 
         ret_value.append((copy_speed,))
+        print_log(copy_speed, print_screen=True, new_line=True)
+
         # 多次测试之间停留
         if i < many:
             time.sleep(SHORT_SLEEP)
@@ -896,7 +873,7 @@ def run_scp_speed(serverip, size=10240, many=1):
     sum_result["success"] = sum_count
     sum_result["scp_speed(MB/s)"] = sum_speed
 
-    return ret_value, sum_result
+    return sum_result
 
 
 # 函数功能：美年大健康UDP乱序检测
@@ -946,16 +923,18 @@ def run_meinian_udp_check(serverip, check_num=20, many=1):
                 tmp_count += float(udp_str[-2])
                 print_log(udp_str[-2], print_screen=True, new_line=False)
 
-        print_log("", print_screen=True,new_line=True)
         # 结束meinian udp任务
         shutdown_process("ConstructTestClient")
         time.sleep(30)
 
+        # 清理临时文件
+        os.system("rm -f ./TestReport.txt 2>&1 > /dev/null")
+
         # 数据处理
         udp_time = tmp_count / check_num
         udp_time = round(udp_time)
-
         ret_value.append((udp_time,))
+        print_log("", print_screen=True, new_line=True)
 
         # 多次测试之间停留
         if i < many:
@@ -974,7 +953,7 @@ def run_meinian_udp_check(serverip, check_num=20, many=1):
     sum_result["success"] = sum_count
     sum_result["time(ms)"] = sum_time
 
-    return ret_value, sum_result
+    return sum_result
 
 
 # 函数功能：多流发送带宽检测
@@ -1009,7 +988,7 @@ def run_multi_user_netperf_send_bandwidth(serverip, flow=16, base_port=7001, typ
         return ret_value, sum_result
 
     for i in range(1, many+1):
-        print_log("Round: %d/%d" % (i, many))
+        print_log("Round: %d/%d" % (i, many), print_screen=True, new_line=False)
         tcp_bw = -1
         for j in range(1, flow+1):
             port = base_port + j - 1
@@ -1038,6 +1017,7 @@ def run_multi_user_netperf_send_bandwidth(serverip, flow=16, base_port=7001, typ
         # 数据处理
         tcp_bw = round(tcp_bw)
         ret_value.append((tcp_bw,))
+        print_log(tcp_bw, print_screen=True, new_line=True)
 
         # 多次测试之间等待
         if i < many:
@@ -1057,7 +1037,7 @@ def run_multi_user_netperf_send_bandwidth(serverip, flow=16, base_port=7001, typ
     sum_result["type"] = type
     sum_result["tx_bw"] = sum_bw
 
-    return ret_value, sum_result
+    return sum_result
 
 
 # 函数功能：多流TCP_RR，改到这里
@@ -1092,7 +1072,7 @@ def run_multi_user_tcp_rr(serverip, flow=16, base_port=7001, test_type="TCP_RR",
         return ret_value, sum_result
 
     for i in range(1, many + 1):
-        print_log("Round: %d/%d" % (i, many))
+        print_log("Round: %d/%d" % (i, many), print_screen=True, new_line=False)
         tcp_rr = 0
 
         try:
@@ -1123,6 +1103,7 @@ def run_multi_user_tcp_rr(serverip, flow=16, base_port=7001, test_type="TCP_RR",
         # 数据格式化
         tcp_rr = round(tcp_rr)
         ret_value.append((tcp_rr,))
+        print_log(tcp_rr, print_screen=True, new_line=True)
 
         # 清理临时文件
         time.sleep(2)
@@ -1170,10 +1151,10 @@ def run_multi_user_tcp_crr(serverip, flow=16, base_port=7001, type="TCP_CRR", te
     print_log(cmd)
     for i in range(1, many + 1):
         cmd = "netperf %s %d flow" % (type, flow)
-        print_log("Round: %d/%d" % (i, many))
+        print_log("Round: %d/%d" % (i, many), print_screen=True, new_line=False)
         tcp_crr = 0
 
-        #临时文件
+        # 临时文件
         tmp_prefix = "/tmp/%s_%dnetperf_crr_" % (LOG_TIME, i)
         cmd = "rm -f %s* 2>&1 > /dev/null" % (tmp_prefix)
         os.system(cmd)
@@ -1184,10 +1165,10 @@ def run_multi_user_tcp_crr(serverip, flow=16, base_port=7001, type="TCP_CRR", te
                    % (serverip, port, type, test_time, byte, tmp_prefix, port)
             os.system(cmd)
 
-        #获取结果
+        # 获取结果
         time.sleep(5 + test_time)
         for j in range(1, flow+1):
-            #有可能netperf报错
+            # 有可能netperf报错
             try:
                 port = base_port + j - 1
                 tmp_file = "%s%d.log" % (tmp_prefix, port)
@@ -1202,11 +1183,12 @@ def run_multi_user_tcp_crr(serverip, flow=16, base_port=7001, type="TCP_CRR", te
         # 数据格式化
         tcp_crr = round(tcp_crr)
         ret_value.append((tcp_crr,))
+        print_log(tcp_crr, print_screen=True, new_line=True)
 
         # 清理临时文件
         time.sleep(2)
-        # cmd = "rm -f %s* 2>&1 > /dev/null" % tmp_prefix
-        # os.system(cmd)
+        cmd = "rm -f %s* 2>&1 > /dev/null" % tmp_prefix
+        os.system(cmd)
 
         # 多次测试之间停留10s
         if i < many:
@@ -1215,7 +1197,7 @@ def run_multi_user_tcp_crr(serverip, flow=16, base_port=7001, type="TCP_CRR", te
     return ret_value
 
 
-#函数功能：多流memcached,默认4条流
+# 函数功能：多流memcached,默认4条流
 def run_multi_user_memcached(serverip, base_port=9001, flow=4, test_time=60, threads=16, concurrency=256, byte=100, many=1):
     """
     #函数功能：多流memcached
@@ -1234,7 +1216,7 @@ def run_multi_user_memcached(serverip, base_port=9001, flow=4, test_time=60, thr
     ret_value = []
     sum_result = {}
 
-    #打印表头
+    # 打印表头
     cmd = "memcached %d flow" % flow
     print_task_name(cmd)
 
@@ -1247,7 +1229,7 @@ def run_multi_user_memcached(serverip, base_port=9001, flow=4, test_time=60, thr
 
     for i in range(1, many + 1):
         cmd = "memcached %d flow" % flow
-        print_log("Round: %d/%d" % (i, many))
+        print_log("Round: %d/%d" % (i, many), print_screen=True, new_line=False)
         tps = 0
 
         # 临时文件
@@ -1285,22 +1267,23 @@ def run_multi_user_memcached(serverip, base_port=9001, flow=4, test_time=60, thr
             else:
                 tps += 0
 
-        #数据处理
+        # 数据处理
         ret_value.append((tps,))
+        print_log(tps, print_screen=True, new_line=True)
 
-        #清理临时文件
+        # 清理临时文件
         tmp_prefix = "/tmp/memcached_"
         cmd = "rm -f %s* 2>&1 > /dev/null" % (tmp_prefix)
         os.system(cmd)
 
-        #多次测试之间停留
+        # 多次测试之间停留
         if i < many:
             time.sleep(SHORT_SLEEP)
 
     return ret_value
 
 
-#函数功能，测试c1000k并发连接数，待处理平均数
+# 函数功能，测试c1000k并发连接数，待处理平均数
 def run_multi_user_c1000k(serverip, flow=2, base_port=11000, many=1):
     """
     #函数功能，测试c1000k并发连接数
@@ -1326,7 +1309,7 @@ def run_multi_user_c1000k(serverip, flow=2, base_port=11000, many=1):
         return ret_value, sum_result
 
     for i in range(1, many + 1):
-        print_log("Round: %d/%d" % (i, many))
+        print_log("Round: %d/%d" % (i, many), print_screen=True, new_line=False)
 
         # 执行c1000k测试
         for j in range(1, flow + 1):
@@ -1373,12 +1356,12 @@ def run_multi_user_c1000k(serverip, flow=2, base_port=11000, many=1):
 
         # 关闭client程序
         process_name = "%s/client" % os.getcwd()
-        print "our time is short!"
         print process_name
         shutdown_process(process_name)
 
         # 结果处理
         ret_value.append((max_conn,))
+        print_log(max_conn, print_screen=True, new_line=True)
 
         # 2次测试程序间隔600s以上,让计算节点tcp老化
         if i < many:
@@ -1394,10 +1377,10 @@ def main():
     global TEST_TIME
     global TEST_MANY
     off()
-    set_ssh_key(host=host, key_value=DEFAULT_PASSWORD)
+    #set_ssh_key(host=host, key_value=DEFAULT_PASSWORD)
     install_tools()
     start_server()
-    '''
+
     ret = run_ping(host, count=TEST_TIME, byte=64, interval=1, many=TEST_MANY)
     print_log(ret)
 
@@ -1444,7 +1427,7 @@ def main():
 
     ret = run_multi_user_memcached(host, test_time=TEST_TIME, many=TEST_MANY)
     print_log(ret)
-    '''
+
 
 if __name__ == '__main__':
     main()
