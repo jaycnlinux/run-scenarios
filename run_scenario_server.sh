@@ -6,10 +6,13 @@ function off()
     pkill netserver
     pkill memcached
     pkill qperf
+    for i in `ps -ef | grep -i '\/server ' | grep -v grep | awk '{print $2}'`;do
+        kill -9 $i
+        sleep 0.1
+    done
     pkill nginx
     nginx -s stop 2>/dev/null 1>/dev/null
     for i in `ps -ef | grep -i construct | grep -v grep | awk '{print $2}'`;do
-        echo $i
         kill -9 $i
         sleep 0.1
     done
@@ -18,6 +21,10 @@ function off()
     pkill netserver
     pkill memcached
     pkill qperf
+    for i in `ps -ef | grep -i '\/server ' | grep -v grep | awk '{print $2}'`;do
+        kill -9 $i
+        sleep 0.1
+    done
     pkill nginx
     nginx -s stop 2>/dev/null 1>/dev/null
     for i in `ps -ef | grep -i construct | grep -v grep | awk '{print $2}'`;do
@@ -61,6 +68,16 @@ function start_server()
     for i in `seq 9001 9004`;do
         memcached -p $i -d -u root 2>/dev/null 1>/dev/null
     done
+
+    echo "start c1000k server port begin 11000 "
+    base_port=11000
+    echo -e "c1000k port \c"
+    for i in `seq 1 16`;do
+        port=$(($base_port + ($i-1)*2000))
+        /root/server $port 2>/dev/null 1>/dev/null &
+        echo -e "$port \c"
+    done
+    echo ""
 }
 
 
