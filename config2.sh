@@ -1,5 +1,6 @@
 #!/bin/bash
 
+sleep 60
 
 for i in `ip addr  | grep eth | grep mtu | awk -F ':' '{print $2}' | awk '{print $1}'`;do
     ifconfig $i mtu 8240 2>/dev/null 1>/dev/null
