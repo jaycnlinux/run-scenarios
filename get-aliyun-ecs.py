@@ -18,7 +18,7 @@ URL = "https://help.aliyun.com/document_detail/25378.html"
 
 # 对齐函数，返回一行对齐字符串
 def align_left(record, is_header=False):
-    header_length = [25, 10, 10, 10, 10, 10, 10]
+    header_length = [25, 10, 10, 5, 10, 5, 5]
     index = 0
     ret_value = ''
 
@@ -138,7 +138,7 @@ def get_aliyun_ecs(target_url=URL):
     keys = keys.replace("[", "").replace("]", "").replace("\"", "").replace(" ", "")
     keys = keys.split(",")
     # 打印最大规格实例
-    print "=" * 75
+    print "=" * 70
     tb_header = align_left(keys, is_header=True)
 
     if len(tb_header) > 0:
@@ -151,7 +151,7 @@ def get_aliyun_ecs(target_url=URL):
 
     # 打印详细输出
     print
-    print "=" * 75
+    print "=" * 70
     raw_input("%sPress Enter for details%s" % (" " * 25, " " * 25))
     tb_header = align_left(keys, is_header=True)
     if len(tb_header) > 0:
@@ -163,13 +163,14 @@ def get_aliyun_ecs(target_url=URL):
             tb_data = align_left(record)
             if len(tb_data) > 0:
                 print tb_data
-        print "-" * 75
+        print "-" * 70
 
 
 # 主函数main
 def main():
     global URL
     get_aliyun_ecs(URL)
+    raw_input("Press Enter to exit")
 
 
 # 全局入口
