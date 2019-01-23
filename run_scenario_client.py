@@ -1,6 +1,6 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-# __author__ = 'c00406647'
+# __author__ = 'chengxiang'
 # version: v0.1
 # date: 2018-10-18
 
