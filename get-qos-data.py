@@ -1,4 +1,4 @@
-#!/usr/bin/python
+﻿#!/usr/bin/python
 # -*- coding: utf-8 -*-
 # __author__ = 'chengxiang'
 
@@ -61,25 +61,45 @@
 
 import os
 import re
-BASE_DIR = 'C:\\Users\\c00406647\\Desktop\\aws-qos-data\\'
+import time
+
+
+BASE_DIR = 'C:\\Users\\administrator\\Desktop\\aws-qos-data\\'
 file_dict = {'bw': 'bw.txt', 'qperf': 'qperf.txt', 'ping': 'ping.txt', 'memcached': 'memcached.txt'}
 
 
 def check_name(func):
+    """ 文件判断装饰器 """
     def wrapper(*args, **kwargs):
         if len(args) == 0 and len(kwargs) == 0:
             print '文件名都没有，搞个毛啊'
         else:
             # print 'call %s, file=%s' % (func.__name__ , args)
-            func(*args, **kwargs)
+            return func(*args, **kwargs)
     return wrapper
 
 
 @check_name
 def process_sar(filename=''):
-    # print os.path.basename(fullname)
-    # print os.path.basename(os.path.dirname(fullname))
-    pass
+    # s_name = os.path.basename(filename)
+    # cur_dir = os.path.basename(os.path.dirname(filename))
+    r_sar = '\d{2}(?::\d+)+\s*(?:AM|PM)\s+(?:ens|eth)\d+'
+    r_begin = 'sar on send'
+    b_begin = False
+    r_end = 'Average:'
+    ret = []
+    with open(filename, 'r') as f:
+        for line in f:
+            if re.search(r_begin, line):
+                b_begin = True
+            if b_begin and re.search(r_sar, line):
+                # 匹配到了sar
+                bw_str = line.split()[-1]
+                bw = round(float(bw_str))
+                ret.append(bw)
+            if re.search(r_end, line):
+                b_begin = False
+    return ret
 
 
 @check_name
@@ -101,19 +121,39 @@ def process_data(basedir=''):
     if not basedir:
         return
     all_file = os.listdir(basedir)
-    file_list = []
+    file_list ={}
+    data = {}
+    # generate file dict
     for f in all_file:
-        if os.path.isfile(os.path.join(BASE_DIR, dirname, f)):
-            file_list.append(f)
-    for f in file_list:
-        fullname = os.path.join(BASE_DIR, cur_dir, f)
-        process_sar(fullname)
-        process_qperf(fullname)
-        process_ping(fullname)
-        process_memcache(fullname)
+        if os.path.isfile(os.path.join(basedir, f)):
+            ret = f.split('-')
+            ftime = ret[0]
+            vender = ret[1]
+            region = ret[2]
+            flavor = ret[3] + '-' + ret[4]
+            vm = ret[5].split('.')[0]
+            ele= {}
+            ele['vender'] = vender
+            ele['region'] = region
+            ele['time'] = ftime
+            ele['file'] = os.path.join(basedir, f)
+            ele['vm'] = vm
+            ele['isread'] = False
+            if flavor not in file_list.keys():
+                file_list[flavor] = []
+            file_list[flavor].append(ele)
+    # generate
+    for k,v in file_list.items():
+        for record in v:
+            print process_sar(record['file'])
+            qperf_data = process_qperf(record['file'])
+            ping_data = process_ping(record['file'])
+            memcache_data = process_memcache(record['file'])
 
 
-for dirname in os.listdir(BASE_DIR):
-    cur_dir = os.path.join(BASE_DIR, dirname)
-    process_data(cur_dir)
 
+# for dirname in os.listdir(BASE_DIR):
+#     cur_dir = os.path.join(BASE_DIR, dirname)
+#     process_data(cur_dir)
+cur_dir = '15.00'
+process_data(os.path.join(BASE_DIR, cur_dir))
