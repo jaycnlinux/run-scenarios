@@ -9,6 +9,7 @@
 import sys
 import os
 import time
+import subprocess
 #import pexpect
 import re
 import copy
@@ -18,9 +19,9 @@ import math
 
 
 # 全局变量 源IP、目标IP列表，流数
+OB_HOST = '192.168.0.209'
 SRC_HOST = '192.168.0.209'
 DST_HOST = '192.168.0.147'
-OB_HOST = '192.168.0.209'
 FLOWS = 0       # 0表示自动设置，否则表示手动
 FLOW_STEP = {'1U': 16, '16U': 32, '32U': 64, '60U': 128}
 RETURN_OK = 0
@@ -32,6 +33,7 @@ DEBUG_MODE = False  # 调试模式
 BASE_DIR = 'log'
 logger = None   # 日志对象
 TASK_APP = ''
+NIC_NAME = 'eth0'
 
 
 class Logger(object):
@@ -113,8 +115,8 @@ class SleepTime(object):
     """    睡眠时钟对象    """
     milli_sec = 0.01
     one_sec = 1
-    ten_sec = 5
-    one_min = 10
+    ten_sec = 10
+    one_min = 60
     ten_min = 600
     half_hour = 1800
 
@@ -128,6 +130,22 @@ def parse_args():
     :return: NULL
     """
     global TASK_APP
+    global NIC_NAME
+    # 获取网卡名称
+    logger.log('check eth: begin')
+    p = subprocess.Popen('ls /sys/class/net | grep -v lo', shell=True, stdout=subprocess.PIPE)
+    nic_list = p.stdout.readlines()
+    p.stdout.close()
+    # 如果有多张网卡
+    if len(nic_list) == 1:
+        NIC_NAME = nic_list[0].strip()
+    else:
+        for nic in nic_list:
+            if 'eth' in nic or 'ens' in nic:    # 兼容aws网卡为ens
+                NIC_NAME = nic.strip()
+                break
+    logger.log('found eth: %s' % NIC_NAME)
+    # 参数解析
     if len(sys.argv) > 1:
         TASK_APP = sys.argv[1]
 
@@ -465,7 +483,7 @@ class SarCollector(object):
     sar_format = '{:<12}  {:<5}  {:<11.2f}  {:<11.2f}  {:<11.2f}  {:<11.2f}'
 
     def __init__(self, src_host=None, dst_host=None, c_time=60, c_type='all',
-                 direction='send', details=False, eth='eth0', sleep_time=30):
+                 direction='send', details=False, eth=NIC_NAME, sleep_time=30):
         self.src_host = copy.deepcopy(src_host) if src_host else []
         self.dst_host = copy.deepcopy(dst_host) if dst_host else []
         self.c_time = c_time
@@ -499,10 +517,8 @@ class SarCollector(object):
 
     def set_param(self, src_host=None, dst_host=None, c_time=None, c_type=None, direction=None, details=None, eth=None):
         """ 设置sar采集参数 """
-        if src_host:
-            self.src_host = copy.deepcopy(src_host)
-        if dst_host:
-            self.dst_host = copy.deepcopy(dst_host)
+        self.src_host = copy.deepcopy(src_host)
+        self.dst_host = copy.deepcopy(dst_host)
         if c_time:
             self.c_time = c_time
         if c_type:
@@ -643,14 +659,14 @@ class SarCollector(object):
 
     def copy_data(self, send_sum=None, recv_sum=None):
         """ 拷贝汇总数据 """
-        if send_sum:
+        if send_sum and self.src_host:
             send_sum['eth'] = self.data['send_sum']['sar'][0][1]
             for record in self.data['send_sum']['sar']:
                 send_sum['rxpps'].append(record[2])
                 send_sum['txpps'].append(record[3])
                 send_sum['rxbw'].append(record[4])
                 send_sum['txbw'].append(record[5])
-        if recv_sum:
+        if recv_sum and self.dst_host:
             recv_sum['eth'] = self.data['recv_sum']['sar'][0][1]
             for record in self.data['recv_sum']['sar']:
                 recv_sum['rxpps'].append(record[2])
@@ -1624,8 +1640,8 @@ def run_netperf_task(tester, repeat=1):
     :param tester: NetperfTester实例
     :param repeat: 重复几次
     """
-    send_dict = {'eth': 'eth0', 'rxpps': [], 'txpps': [], 'rxbw': [], 'txbw': []}
-    recv_dict = {'eth': 'eth0', 'rxpps': [], 'txpps': [], 'rxbw': [], 'txbw': []}
+    send_dict = {'eth': NIC_NAME, 'rxpps': [], 'txpps': [], 'rxbw': [], 'txbw': []}
+    recv_dict = {'eth': NIC_NAME, 'rxpps': [], 'txpps': [], 'rxbw': [], 'txbw': []}
     # 测试次数
     for i in range(0, repeat):
         tester.run('Round %d:    ' % (i+1))
@@ -1698,6 +1714,23 @@ def run_memcached_task(tester, repeat=1):
             time.sleep(SleepTime.ten_sec)
 
 
+def shutoff_ecs(hosts=None):
+    """
+    函数功能：关机脚本
+    :param hosts:
+    :return:
+    """
+    if hosts:
+        if type(hosts) is str:
+            hosts = [hosts]
+    else:
+        return RETURN_FAIL
+    # 关机程序
+    for host in hosts:
+        Public.exec_shell_command(host, ['poweroff'])
+        time.sleep(SleepTime.one_sec)
+
+
 def main():
     # 主函数
     global DEBUG_MODE
@@ -1731,8 +1764,7 @@ def main():
         netperf_param1 = TestParam(None, None, 'TCP_STREAM', 7001, 0, '0', 0, 7200, 1440)
         netperf_param1.set_param(src_host=src_host_list, dst_host=dst_host_list)
         netperf_tester1 = NetperfTester(netperf_param1)
-        netperf_tester1.sar.set_param(src_host=src_host_list, dst_host=dst_host_list, c_time=10, details=True,
-                                      eth='eth0')
+        netperf_tester1.sar.set_param(src_host=src_host_list, dst_host=None, c_time=60, details=True, eth=NIC_NAME)
         run_netperf_task(netperf_tester1, repeat)
         netperf_tester1.stop()
     if 'iperf3' in task_app:
@@ -1741,21 +1773,21 @@ def main():
             iperf3_param1 = TestParam(None, None, 'udp', 8001, 0, '', set_kpps=pps, test_time=3600, pkt_len=64)
             iperf3_param1.set_param(src_host=src_host_list, dst_host=dst_host_list, test_time=3600)
             iperf3_test1 = Iperf3Tester(iperf3_param1)
-            iperf3_test1.sar.set_param(src_host=src_host_list, c_time=10, details=True, eth='eth0')
+            iperf3_test1.sar.set_param(src_host=src_host_list, c_time=10, details=True, eth=NIC_NAME)
             logger.log()
             iperf3_test1.run()
             iperf3_test1.sar.run()
     if 'qperf' in task_app:
         qperf_test1 = QperfTester()
-        qperf_test1.param.set_param([src_host_list[0]], [dst_host_list[0]], 'udp_lat', test_time=10, pkt_len=64)
+        qperf_test1.param.set_param([src_host_list[0]], [dst_host_list[0]], 'udp_lat', test_time=60, pkt_len=64)
         run_qperf_task(qperf_test1, repeat)
     if 'ssh' in task_app:
         run_ssh_login_and_get_time([OB_HOST], src_host_list, test_time=100, sleep_gap=2, test_round=5)
     if 'ping' in task_app:
-        ping_tester1 = PingTester(src=src_host_list[0], dst=dst_host_list[0], count=10, interval=1.0)
-        run_ping_task(ping_tester1, repeat)
+        ping_tester1 = PingTester(src=src_host_list[0], dst=dst_host_list[0], count=3600, interval=1.0)
+        run_ping_task(ping_tester1, 1)
     if 'memcached' in task_app:
-        memcached_tester1 = MemcachedTester(src_host_list, dst_host_list, 22122, 10, 16, 256, 100)
+        memcached_tester1 = MemcachedTester(src_host_list, dst_host_list, 22122, 60, 16, 256, 100)
         run_memcached_task(memcached_tester1, repeat)
 
 
