@@ -1,16 +1,23 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 # __author__ = 'chengxiang'
-# version: v0.2
 # date: 20190328
-# 修改内容：引进Class对象编程
+# 修改内容：
+# 20190328 引进Class对象编程
+# 20190402 增加SSH Trust
+# 脚本存在问题：
+# 2.iperf3 0 pps空载压力的场景，需要处理，当前pps=0 -b=0是极限加压
+# 3.exec_shell_command的时候，判断是否为本机，如果是本机，无需ssh
+# 4.同时加压和串行加压，在main函数里需要优化
+# 5.为啥先sar，后netperf就出问题，netperf打了双倍的流，需要分析
+# 6.切换成socket模式，避免scp方式数据拷贝
 
 
 import sys
 import os
 import time
 import subprocess
-#import pexpect
+import base64
 import re
 import copy
 import logging
@@ -19,46 +26,53 @@ import math
 
 
 # 全局变量 源IP、目标IP列表，流数
-OB_HOST = '192.168.0.209'
-SRC_HOST = '192.168.0.209'
-DST_HOST = '192.168.0.147'
-FLOWS = 0       # 0表示自动设置，否则表示手动
+
+SRC_HOST = '192.168.0.202'
+DST_HOST = '192.168.0.69'
 FLOW_STEP = {'1U': 16, '16U': 32, '32U': 64, '60U': 128}
 RETURN_OK = 0
 RETURN_FAIL = -1
-LOG_FILE = ''
+
 ORDER_STEP = 0  # 依次测试，N:N的场景
 ORDER_ALL = 1   # 同时测试，N:N的场景
 DEBUG_MODE = False  # 调试模式
 BASE_DIR = 'log'
-logger = None   # 日志对象
+
 TASK_APP = ''
-NIC_NAME = 'eth0'
+
+
+# 登录
+PASS_DICT = {'123': 'SHVhd2VpQDEyMw==',
+             '1234': 'SHVhd2VpQDEyMzQ='}
 
 
 class Logger(object):
-    def __init__(self, logfile=''):
-        time_struct = time.localtime(time.time())
-        log_suffix = time.strftime('real-%Y-%m-%d_%H%M%S.log', time_struct)
+    def __init__(self, logfile='', prefix=''):
         if logfile:
-            self.logfile = '%s%s%s' % (BASE_DIR, os.sep, logfile)
+            self.logfile = os.path.join(BASE_DIR, logfile)
         else:
-            self.logfile = '%s%s%s' % (BASE_DIR, os.sep, log_suffix)
-        # 屏幕对象
+            time_struct = time.localtime(time.time())
+            logfile = time.strftime('%Y-%m-%d_%H%M%S.log', time_struct)
+            if prefix:
+                logfile = '%s-%s' % (prefix, logfile)
+            else:
+                logfile = '%s-%s' % ('real', logfile)
+            self.logfile = os.path.join(BASE_DIR, logfile)
+        # console logger
         self.logger_c = logging.getLogger('console')
-        self.format_c = logging.Formatter('%(message)s')  # 屏幕显示不需要日志格式
+        self.format_c = logging.Formatter('%(message)s')
         self.stream_c = logging.StreamHandler()
         self.stream_c.setFormatter(self.format_c)
         self.logger_c.setLevel(logging.DEBUG)
         self.logger_c.addHandler(self.stream_c)
-        # 日志对象
-        self.logger_f = logging.getLogger(log_suffix)
+        # file logger
+        self.logger_f = logging.getLogger(os.path.dirname(__file__))
         self.format_f = logging.Formatter('%(message)s')
         self.stream_f = logging.FileHandler(self.logfile)
         self.stream_f.setFormatter(self.format_f)
         self.logger_f.setLevel(logging.DEBUG)
         self.logger_f.addHandler(self.stream_f)
-        # 写入日志
+        # init file
         time_struct = time.localtime(time.time())
         msg = time.strftime('%Y-%m-%d_%H:%M:%S', time_struct)
         self.logger_c.info('======== LOG BEGIN %s ========' % msg)
@@ -70,8 +84,8 @@ class Logger(object):
         if not logfile:
             return
         if logfile:
-            self.logfile = '%s%s%s' % (BASE_DIR, os.sep, logfile)
-        # 移除文件
+            self.logfile = os.path.join(BASE_DIR, logfile)
+        # new logfile
         self.logger_f.removeHandler(self.stream_f)
         del self.stream_f
         self.logger_f = logging.getLogger(logfile)
@@ -80,18 +94,25 @@ class Logger(object):
         self.stream_f.setFormatter(self.format_f)
         self.logger_f.setLevel(logging.DEBUG)
         self.logger_f.addHandler(self.stream_f)
-        # 打印初始日志
+        # init loginfo
         time_struct = time.localtime(time.time())
         msg = time.strftime('%Y-%m-%d_%H:%M:%S', time_struct)
         self.logger_c.info('======== LOG BEGIN %s ========' % msg)
         self.logger_f.info('======== LOG BEGIN %s ========' % msg)
 
-    def crate_new_log(self):
+    def get_logfile(self):
+        return self.logfile
+
+    def crate_new_log(self, prefix=''):
         """ 重新生成当前时间的日志 """
         global BASE_DIR
         time_struct = time.localtime(time.time())
-        log_suffix = time.strftime('real-%Y-%m-%d_%H%M%S.log', time_struct)
-        self.logfile = '%s%s%s' % (BASE_DIR, os.sep, log_suffix)
+        logfile = time.strftime('%Y-%m-%d_%H%M%S.log', time_struct)
+        if prefix:
+            logfile = '%s-%s' % (prefix, logfile)
+        else:
+            logfile = '%s-%s' % ('real', logfile)
+        self.logfile = os.path.join(BASE_DIR, logfile)
         self.set_logfile(self.logfile)
 
     def log(self, msg, print_screen=True):
@@ -131,21 +152,22 @@ def parse_args():
     """
     global TASK_APP
     global NIC_NAME
-    # 获取网卡名称
+    global OB_HOST
+    # get nic name
     logger.log('check eth: begin')
-    p = subprocess.Popen('ls /sys/class/net | grep -v lo', shell=True, stdout=subprocess.PIPE)
+    p = subprocess.Popen('ls /sys/class/net | grep -v lo', shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     nic_list = p.stdout.readlines()
     p.stdout.close()
-    # 如果有多张网卡
-    if len(nic_list) == 1:
-        NIC_NAME = nic_list[0].strip()
-    else:
-        for nic in nic_list:
-            if 'eth' in nic or 'ens' in nic:    # 兼容aws网卡为ens
-                NIC_NAME = nic.strip()
-                break
+    # enumrate each nic
+    for nic in nic_list:
+        if re.search('eth\d+', nic) or re.search('ens\d+', nic):    # aws is ens
+            NIC_NAME = nic.strip()
+            break
     logger.log('found eth: %s' % NIC_NAME)
-    # 参数解析
+    # get local ip, and set to OB_HOST
+    OB_HOST = Public.get_local_ip()
+    logger.log('set ob=%s' % OB_HOST)
+    # arguments parse
     if len(sys.argv) > 1:
         TASK_APP = sys.argv[1]
 
@@ -192,77 +214,88 @@ class Public(object):
         return LOG_FILE
 
     @staticmethod
-    def print_log(msg, level=0, log_file='', print_screen=True, new_line=True):
-        """    函数功能：打印到日志    """
-        # 全局变量
-        global logger
-        # 局部变量
-        format_color = {0: '%s',  # 默认色
-                        1: '\033[32m%s\033[0m',  # 绿色
-                        2: '\033[33m%s\033[0m',  # 黄色
-                        3: '\033[31m%s\033[0m'  # 红色
-                        }
+    def set_ssh_trust(iplist=None, passidx='123'):
+        """
+        函数功能：设置ssh信任关系
+        :param iplist: IP地址列表
+        :param passidx: 密码索引
+        """
+        key_file = '/root/.ssh/id_rsa'
+        password = base64.b64decode(PASS_DICT[passidx])
+        ret_value = RETURN_OK
+        # generate ssh key
+        if not os.path.isfile(key_file):
+            cmd = r"""
+            expect -c '
+            set timeout 10;
+            spawn ssh-keygen -t rsa;
+            expect {
+                "*Enter file in which*" {
+                    send "\r"
+                    exp_continue
+                }
+                "*Enter passphrase*" {
+                    send "\r"
+                    exp_continue
+                }
+                "*Enter same passphrase again*" {
+                    send "\r"
+                    exp_continue
+                }
+                timeout  {
+                    send_user "create ssh-key failed\n"
+                    close
+                }
+            }
+            '
+            """
+            p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            (output, error) = p.communicate()
+            time.sleep(SleepTime.one_sec)
+        # copy-ssh-id
+        for host in iplist:
+            cmd = r"""
+                expect -c '
+                set timeout 10;
+                spawn ssh-copy-id {host}
+                expect {{
+                    "*continue connecting*" {{
+                        send "yes\r"
+                        exp_continue
+                    }}
+                    "*assword*" {{
+                        send "{password}\r"
+                        exp_continue
+                    }}
+                    "*(yes/no)?*" {{
+                        send "yes\r"
+                        exp_continue
+                    }}
+                    "locked." {{
+                        sleep 300
+                        close
+                        spawn ssh-copy-id -i /root/.ssh/id_rsa.pub root@$host
+                        send_user "host {host} locked, retry in next 300 seconds"
+                        exp_continue
+                    }}
+                    timeout  {{
+                        send_user "ssh-copy-id to {host} failed\n"
+                        close
+                    }}
+                }}
+                '
+            """.format(host=host, password=password)
+            # 注意，在原始字符串"""用format方法的时候，里面的{}被认为是符号变量，因此要用双重括号{{   }}去掉转义
+            p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            (output, error) = p.communicate()
+            logger.log('ssh-copy-id %s result:' % host)
+            if 'already installed' in output:
+                # logger.log('ok')
+                pass
+            else:
+                # logger.log('fail')
+                pass
 
-        format_msg = format_color[level] % str(msg)
-        if log_file:
-            stream_file = logging.StreamHandler(log_file)
-            stream_file.setLevel(logging.DEBUG)
-            format_file = logging.Formatter('%(asctime)s-%(levelname)s:%(message)s')
-            stream_file.setFormatter(format_file)
-            logger.addHandler(stream_file)
-            logger.debug(format_msg)
-            logger.removeHandler(stream_file)
-            # with open(log_file, 'a+') as f:
-            #     if new_line:
-            #         f.write(str(msg) + "\n")
-            #     else:
-            #         f.write(str(msg) + " ")
-        if print_screen:
-            logger.debug(str(format_msg))
-            # if new_line:
-            #     print format_msg
-            # else:
-            #     sys.stdout.write(msg)
-            #     sys.stdout.flush()
-        return RETURN_OK
-
-    # @staticmethod
-    # def copy_ssh_key(host, key_type="password", key_value=''):
-    #     """
-    #     # 函数功能：建立SSH信任关系
-    #     :param host: 目标host
-    #     :param key_type:认证类型
-    #     :param key_value:秘钥值或者密码值
-    #     """
-    #     # 局部变量
-    #     ssh = None
-    #     # 判断本端id_rsa是否存在
-    #     if os.path.isfile("/root/.ssh/id_rsa") is False:
-    #         ssh = pexpect.spawn("ssh-keygen -t rsa")
-    #         ssh.sendline("")
-    #         time.sleep(0.2)
-    #         ssh.sendline("")
-    #         time.sleep(0.2)
-    #         ssh.sendline("")
-    #         time.sleep(5)
-    #         ssh.close()
-    #         print "ssh-keygen -t rsa success"
-    #
-    #     ssh = pexpect.spawn("ssh-copy-id %s" % host)
-    #     try:
-    #         i = ssh.expect(['password:', 'continue connecting (yes/no)?'], timeout=5)
-    #         if i == 0:
-    #             ssh.sendline(key_value)
-    #             time.sleep(5)
-    #         elif i == 1:
-    #             ssh.sendline("yes")
-    #             ssh.expect("password:")
-    #             ssh.sendline(key_value)
-    #             time.sleep(5)
-    #     except pexpect.EOF:
-    #         ssh.close()
-    #     except Exception, e:
-    #         print "SSH error: %s" % e
 
     @staticmethod
     def exec_shell_command(host='', cmd_list=None, backgroud=False):
@@ -276,6 +309,7 @@ class Public(object):
         ret = RETURN_OK
         tmp_cmd_file = 'tmp-cmd.sh'
         dst_cmd_file = 'run-cmd.sh'
+        myip = Public.get_local_ip()
 
         if len(cmd_list) < 0:
             return RETURN_FAIL
@@ -286,7 +320,7 @@ class Public(object):
             f.writelines([line + ' \n' for line in cmd_list])
 
         # 文件拷贝,并执行命令
-        if host:
+        if host and host != myip:
             cmd = "script -q -c 'scp %s %s:/root/%s' >/dev/null" % (tmp_cmd_file, host, dst_cmd_file)
             ret = os.system(cmd)
             if backgroud:
@@ -424,7 +458,8 @@ class Public(object):
 
         # 关闭服务后，等待一段时间
         time.sleep(SleepTime.ten_sec)
-        os.remove(tmp_cmd_file)
+        if os.path.isfile(tmp_cmd_file):
+            os.remove(tmp_cmd_file)
         if DEBUG_MODE:
             logger.log('off: done')
         return RETURN_OK
@@ -467,8 +502,20 @@ class Public(object):
             if DEBUG_MODE:
                 logger.log('select_flow_from_host: flow=%d' % set_flow)
         # 清理临时文件
-        os.remove(cpu_log)
+        if os.path.isfile(cpu_log):
+            os.remove(cpu_log)
         return set_flow
+
+    @staticmethod
+    def get_local_ip():
+        ret_ip = ''
+        p = subprocess.Popen('ifconfig %s' % NIC_NAME, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        ret_str = p.stdout.read()
+        p.stdout.close()
+        ret_obj = re.search('inet\s\d+(?:\.\d+){3}', ret_str)
+        if ret_obj:
+            ret_ip = ret_obj.group().split()[-1]
+        return ret_ip
 
 
 class SarCollector(object):
@@ -483,14 +530,14 @@ class SarCollector(object):
     sar_format = '{:<12}  {:<5}  {:<11.2f}  {:<11.2f}  {:<11.2f}  {:<11.2f}'
 
     def __init__(self, src_host=None, dst_host=None, c_time=60, c_type='all',
-                 direction='send', details=False, eth=NIC_NAME, sleep_time=30):
+                 direction='send', details=False, eth='', sleep_time=30):
         self.src_host = copy.deepcopy(src_host) if src_host else []
         self.dst_host = copy.deepcopy(dst_host) if dst_host else []
         self.c_time = c_time
         self.c_type = c_type
         self.direction = direction
         self.details = details
-        self.eth = eth
+        self.eth = eth if eth else NIC_NAME
         self.sleep_time = sleep_time
         self.send_sum = 'send_sum'
         self.recv_sum = 'recv_sum'
@@ -513,7 +560,6 @@ class SarCollector(object):
             for i in self.dst_host:
                 self.data[i] = {'sar': [], 'avg': []}
         # 多次测试的结果
-
 
     def set_param(self, src_host=None, dst_host=None, c_time=None, c_type=None, direction=None, details=None, eth=None):
         """ 设置sar采集参数 """
@@ -569,7 +615,8 @@ class SarCollector(object):
         # 删除临时文件
         time.sleep(3)
         logger.log('remove %s' % sar_file)
-        os.remove(sar_file)
+        if os.path.isfile(sar_file):
+            os.remove(sar_file)
         return RETURN_OK
 
     def __calc_sum(self, host_list, sum_type='send_sum'):
@@ -835,9 +882,6 @@ class TestParam(object):
             self.test_time = test_time
         if pkt_len:
             self.pkt_len = pkt_len
-        # 参数冲突处理，如果设置了带宽，则带宽优先
-        if self.set_mb:
-            self.set_kpps = 0
 
     @property
     def check_param(self):
@@ -1001,8 +1045,10 @@ class NetperfTester(object):
         if DEBUG_MODE:
             logger.log('call_netperf: start server')
         # 打印信息
-        logger.log('%snetperf: %s --> %s type=%s pkt_len=%d' %
-                   (prefix, self.param.src_host, self.param.dst_host, self.param.test_type, self.param.pkt_len))
+        # 'round x: src --> dst type pktlen time flows
+        logger.log('%snetperf: %s --> %s %s bytes=%d flow=%d' %
+                   (prefix, self.param.src_host, self.param.dst_host, self.param.test_type,
+                    self.param.pkt_len, self.param.flows))
         # 启动server
         for i in s:
             Public.exec_shell_command(i['host'], i['cmd'])
@@ -1016,6 +1062,7 @@ class NetperfTester(object):
             time.sleep(SleepTime.milli_sec)
         if DEBUG_MODE:
             logger.log('NetperfTester run: done')
+
 
 class Iperf3Tester(object):
     def __init__(self, param=None, sar=None):
@@ -1063,8 +1110,11 @@ class Iperf3Tester(object):
                 if self.param.flows == 0:
                     self.param.flows = Public.select_flow_from_host(self.param.src_host[i])
                 # 根据PPS选择带宽
-                if self.param.set_kpps:
+                if self.param.set_kpps > 0:
                     self.param.set_mb = self.select_iperf3_bw_from_flow()
+                # kpps = 0, do nothing and return
+                elif self.param.set_kpps == 0:
+                    return RETURN_OK, client_cmd, server_cmd
                 if DEBUG_MODE:
                     logger.log('make_iperf3_cmd: self.param=%s' % repr(self.param.__dict__))
                 logger.log('host=%s\tflows=%d' % (self.param.src_host[i], self.param.flows))
@@ -1102,8 +1152,12 @@ class Iperf3Tester(object):
             # 传入flows=0则表示自动判断流数
             if self.param.flows == 0:
                 self.param.flows = Public.select_flow_from_host(self.param.src_host[0])
-            # 带宽计算
-            self.param.set_mb = self.select_iperf3_bw_from_flow()
+            # set set_mb according to kpps
+            if self.param.set_kpps > 0:
+                self.param.set_mb = self.select_iperf3_bw_from_flow()
+            elif self.param.set_kpps == 0:
+                # kpps = 0, do nothing and return
+                return RETURN_OK, client_cmd, server_cmd
             if DEBUG_MODE:
                 logger.log('make_iperf3_cmd: self.param=%s' % repr(self.param.__dict__))
             logger.log('host=%s\tflows=%d' % (self.param.src_host[0], self.param.flows))
@@ -1244,15 +1298,17 @@ class Iperf3Tester(object):
             logger.log('call_iperf3: start server')
         # 启动server
         for i in s:
-            Public.exec_shell_command(i['host'], i['cmd'])
-            time.sleep(SleepTime.milli_sec)
+            if i['cmd']:
+                Public.exec_shell_command(i['host'], i['cmd'])
+                time.sleep(SleepTime.milli_sec)
         time.sleep(SleepTime.ten_sec)
         # 启动client
         if DEBUG_MODE:
             logger.log('call_iperf3: start client')
         for i in c:
-            Public.exec_shell_command(i['host'], i['cmd'])
-            time.sleep(SleepTime.milli_sec)
+            if i['cmd']:
+                Public.exec_shell_command(i['host'], i['cmd'])
+                time.sleep(SleepTime.milli_sec)
 
     def get_data(self):
         pass
@@ -1386,7 +1442,8 @@ class QperfTester(object):
             # 存储数据
             self.data['lat'].append(lat)
             # 清除临时文件
-            os.remove(dst_file)
+            if os.path.isfile(dst_file):
+                os.remove(dst_file)
 
     def run(self, prefix=''):
         """
@@ -1396,7 +1453,6 @@ class QperfTester(object):
         # 执行入口代码
         logger.log('%sqperf: src=%s dst=%s type=%s pkt_len=%d' %
                    (prefix, self.param.src_host[0], self.param.dst_host[0], self.param.test_type, self.param.pkt_len))
-        Public.off(self.param.src_host + self.param.dst_host, ['qperf'])
         self.call_qperf(self.param.src_host, self.param.dst_host)
 
 
@@ -1449,7 +1505,8 @@ class PingTester(object):
                         lat = 0.0
                     self.data.append(lat)
         # 移除临时文件
-        os.remove(dst_file)
+        if os.path.isfile(dst_file):
+            os.remove(dst_file)
 
     def run(self, prefix=''):
         logger.log('%sping: start %s to %s' % (prefix, self.src, self.dst))
@@ -1465,6 +1522,7 @@ class MemcachedTester(object):
     """ 新浪memcached业务测试 """
     srv_file = '/root/%s_memcached.log'
     tmp_file = '/tmp/%s_memcached.log'
+
     def __init__(self, src_host=None, dst_host=None, port=22122, t_time=60, thread=16, vusers=256, t_byte=100):
         if src_host:
             self.src_host = src_host if type(src_host) is list else [src_host]
@@ -1525,10 +1583,11 @@ class MemcachedTester(object):
             os.system(cmd)
         # 分析数据
         for host in self.src_host:
-            if not os.path.isfile(self.tmp_file % host):
+            t_file = self.tmp_file % host
+            if not os.path.isfile(t_file):
                 return RETURN_FAIL
             tps = 0
-            with open(self.tmp_file % host, 'r') as f:
+            with open(t_file, 'r') as f:
                 for line in f:
                     line = line.strip()
                     # 写入日志
@@ -1543,7 +1602,8 @@ class MemcachedTester(object):
             # 加入数据仓库
             self.data[host] = tps
             # 清理临时文件
-            os.remove(self.tmp_file % host)
+            if os.path.isfile(t_file):
+                os.remove(t_file)
 
     def run(self, prefix=''):
         r,c,s = self._make_cmd()
@@ -1562,8 +1622,9 @@ class MemcachedTester(object):
         if DEBUG_MODE:
             logger.log('MemcachedTester run: done')
 
+
 def run_ssh_login_and_get_time(src_host_list=None, dst_host_list=None, test_time=100, sleep_gap=2,
-                         test_order=ORDER_ALL, test_round=5):
+                               test_order=ORDER_ALL, test_round=5):
     """
     # 函数功能：测试ssh时长
     :param src_host_list: 源IP列表
@@ -1578,6 +1639,9 @@ def run_ssh_login_and_get_time(src_host_list=None, dst_host_list=None, test_time
         ssh_avg_list = {}  # 数据格式{ '192.168.0.1':{'sum':0, 'avg':0, 'details':[1, 2, 3]} }
         if DEBUG_MODE:
             logger.log('call_ssh: begin make commands')
+        if set(src_host_list) == set(dst_host_list):
+            logger.log('warning: same src and dst,exit\nsrc=%s\ndst=%s' % (str(src_host_list), str(dst_host_list)))
+            return
         for i in src_host_list:
             element = dict(host=i, cmd=[], file='')
             client_cmd.append(element)
@@ -1735,10 +1799,9 @@ def main():
     # 主函数
     global DEBUG_MODE
     global logger
-    # task_app = ['memcached', 'qperf', 'ping', 'netperf']
-    task_app = ['netperf']
+    task_app = ['memcached', 'qperf', 'ping', 'netperf']
     test_order = ORDER_ALL
-    repeat = 5
+    repeat = 100
 
     # 获取参数
     if TASK_APP and (TASK_APP not in task_app):
@@ -1754,13 +1817,17 @@ def main():
         if not dst_host_list[i]:
             dst_host_list.pop(i)
 
+    # 建立信任关系
+    Public.set_ssh_trust(src_host_list+dst_host_list, '123')
     # 停止打流
     Public.off(src_host_list + dst_host_list)
-
     # 打流方式
     if DEBUG_MODE:
         logger.log('main: test_type = %s' % task_app)
     if 'netperf' in task_app:
+        logger.log('task_app: %s' % task_app)
+        # 排除上一个过程干扰，先等待1min
+        time.sleep(SleepTime.one_min)
         netperf_param1 = TestParam(None, None, 'TCP_STREAM', 7001, 0, '0', 0, 7200, 1440)
         netperf_param1.set_param(src_host=src_host_list, dst_host=dst_host_list)
         netperf_tester1 = NetperfTester(netperf_param1)
@@ -1768,30 +1835,47 @@ def main():
         run_netperf_task(netperf_tester1, repeat)
         netperf_tester1.stop()
     if 'iperf3' in task_app:
+        logger.log('task_app: %s' % task_app)
+        # 排除上一个过程干扰，先等待1min
+        time.sleep(SleepTime.one_min)
         # 先测一波梯度pps
-        for pps in range(1, 10, 1):
+        for pps in range(0, 10, 1):
             iperf3_param1 = TestParam(None, None, 'udp', 8001, 0, '', set_kpps=pps, test_time=3600, pkt_len=64)
             iperf3_param1.set_param(src_host=src_host_list, dst_host=dst_host_list, test_time=3600)
             iperf3_test1 = Iperf3Tester(iperf3_param1)
             iperf3_test1.sar.set_param(src_host=src_host_list, c_time=10, details=True, eth=NIC_NAME)
-            logger.log()
             iperf3_test1.run()
             iperf3_test1.sar.run()
     if 'qperf' in task_app:
+        logger.log('task_app: %s' % task_app)
+        # 排除上一个过程干扰，先等待1min
+        time.sleep(SleepTime.one_min)
         qperf_test1 = QperfTester()
         qperf_test1.param.set_param([src_host_list[0]], [dst_host_list[0]], 'udp_lat', test_time=60, pkt_len=64)
         run_qperf_task(qperf_test1, repeat)
     if 'ssh' in task_app:
+        logger.log('task_app: %s' % task_app)
+        # 排除上一个过程干扰，先等待1min
+        time.sleep(SleepTime.one_min)
         run_ssh_login_and_get_time([OB_HOST], src_host_list, test_time=100, sleep_gap=2, test_round=5)
     if 'ping' in task_app:
+        logger.log('task_app: %s' % task_app)
+        # 排除上一个过程干扰，先等待1min
+        time.sleep(SleepTime.one_min)
         ping_tester1 = PingTester(src=src_host_list[0], dst=dst_host_list[0], count=3600, interval=1.0)
         run_ping_task(ping_tester1, 1)
     if 'memcached' in task_app:
+        logger.log('task_app: %s' % task_app)
+        # 排除上一个过程干扰，先等待1min
+        time.sleep(SleepTime.one_min)
         memcached_tester1 = MemcachedTester(src_host_list, dst_host_list, 22122, 60, 16, 256, 100)
         run_memcached_task(memcached_tester1, repeat)
 
 
 if __name__ == '__main__':
+    OB_HOST = 'auto'
+    NIC_NAME = 'eth0'
+    LOG_FILE = ''
     # 创建log目录
     if not os.path.isdir(BASE_DIR):
         os.mkdir(BASE_DIR)
