@@ -1,6 +1,7 @@
 #!/usr/bin/python
-# -*- encoding: utf-8 -*-
+# -*- coding: utf-8 -*-
 # __author__ = 'chengxiang'
+# date: 20190406
 
 
 import os, sys
@@ -8,9 +9,10 @@ import re
 import copy
 import time
 import numpy
+import shutil
 
 
-BASE_DIR = 'C:\\Users\\c00406647\\Desktop\\aws-qos-data\\'
+BASE_DIR = 'C:\\Users\\administrator\\Desktop\\aws-qos-data\\'
 file_dict = {'bw': 'bw.txt', 'qperf': 'qperf.txt', 'ping': 'ping.txt', 'memcached': 'memcached.txt'}
 RESULT_DIR = 'new'
 RESULT_DATA = []
@@ -217,6 +219,10 @@ def process_data(basedir=''):
 
 
 def generate_data_from_log():
+    dst_dir = os.path.join(BASE_DIR, RESULT_DIR)
+    if os.path.isdir(dst_dir):
+        for each_file in os.listdir(dst_dir):
+            os.remove(os.path.join(BASE_DIR, RESULT_DIR, each_file))
     for dirname in os.listdir(BASE_DIR):
         cur_dir = os.path.join(BASE_DIR, dirname)
         # 排除目标文件夹
@@ -248,6 +254,8 @@ def compute_percent_and_avg(datalist):
 def compute_data_by_site():
     """ 站点间数据比较 """
     csv_file = os.path.join(BASE_DIR, RESULT_DIR, 'site.csv')
+    csv_site_sum_file = os.path.join(BASE_DIR, RESULT_DIR, 'site0.csv')
+    item_list = ['p99', 'p100', 'pavg', 'pdev', 'avg']
     with open(csv_file, 'a') as f:
         f.write('vender,region,flavor,type,p99,p100,pavg,pdev,avg\n')
     # csv表格存储
@@ -286,8 +294,8 @@ def compute_data_by_site():
                     print msg
                 if qperf_data:
                     avg,p99,p100,pavg,pdev = compute_percent_and_avg(qperf_data)
-                    msg = msg_format.format(vender, region, flavor, 'qperf', p99, p100, pavg, pdev, round(avg, 1))
-                    ele = [vender, region, flavor, 'tcp-bw', p99, p100, pavg, pdev, int(avg)]
+                    msg = msg_format.format(vender, region, flavor, 'qperf-udp', p99, p100, pavg, pdev, round(avg, 1))
+                    ele = [vender, region, flavor, 'qperf-udp', p99, p100, pavg, pdev, int(avg)]
                     sum_qperf.append(ele)
                     with open(csv_file, 'a') as f:
                         f.write(msg+'\n')
@@ -295,7 +303,7 @@ def compute_data_by_site():
                 if ping_data:
                     avg,p99,p100,pavg,pdev = compute_percent_and_avg(ping_data)
                     msg = msg_format.format(vender, region, flavor, 'ping', p99, p100, pavg, pdev, round(avg, 2))
-                    ele = [vender, region, flavor, 'tcp-bw', p99, p100, pavg, pdev, int(avg)]
+                    ele = [vender, region, flavor, 'ping', p99, p100, pavg, pdev, round(avg, 2)]
                     sum_ping.append(ele)
                     with open(csv_file, 'a') as f:
                         f.write(msg+'\n')
@@ -303,7 +311,7 @@ def compute_data_by_site():
                 if memcache_data:
                     avg,p99,p100,pavg,pdev = compute_percent_and_avg(memcache_data)
                     msg = msg_format.format(vender, region, flavor, 'memcache', p99, p100, pavg, pdev, int(avg))
-                    ele = [vender, region, flavor, 'tcp-bw', p99, p100, pavg, pdev, int(avg)]
+                    ele = [vender, region, flavor, 'memcache', p99, p100, pavg, pdev, int(avg)]
                     sum_memcache.append(ele)
                     with open(csv_file, 'a') as f:
                         f.write(msg+'\n')
@@ -315,15 +323,34 @@ def compute_data_by_site():
         flavor_list = TYPE_LIST[vender]['flavor']
         region_list = TYPE_LIST[vender]['region']
         for flavor in flavor_list:
-            msg =  '===================== flavor %s' % flavor
+            msg = '===================== flavor %s' % flavor
             print msg
-            with open('site0.csv', 'a') as f:
-                f.write(msg+'\n')
+            # flavor表头
+            csv_sum_header = []
+            csv_sum_header.append(flavor)
+            for item in item_list:
+                for region in region_list:
+                    csv_sum_header.append('%s-%s' % (item, region))
+            format_header = ','.join(csv_sum_header)
+            # 写入文件
+            with open(csv_site_sum_file, 'a') as f:
+                f.write('\n' + format_header + '\n')
             for ttype in type_list:
                 v = dict()
                 for region in region_list:
                     v[region] = []
-                    for record in sum_qperf:
+                    v[region].append(ttype)
+                    # 类型判断
+                    sum_list = []
+                    if ttype == 'tcp-bw':
+                        sum_list = sum_bw
+                    elif ttype == 'qperf-udp':
+                        sum_list = sum_qperf
+                    elif ttype == 'ping':
+                        sum_list = sum_ping
+                    elif ttype == 'memcache':
+                        sum_list = sum_memcache
+                    for record in sum_list:
                         t_vender = record[0]
                         t_region = record[1]
                         t_flavor = record[2]
@@ -334,14 +361,16 @@ def compute_data_by_site():
                         t_pdev = record[7]
                         t_avg = record[8]
                         if t_vender == vender and t_region == region and t_flavor == flavor and t_type == ttype:
-                            v[region].append(t_p99)
-                            v[region].append(t_p100)
-                            v[region].append(t_pavg)
+                            v[region].append(str(t_p99)+'%')
+                            v[region].append(str(t_p100)+'%')
+                            v[region].append(str(t_pavg)+'%')
                             v[region].append(t_pdev)
                             v[region].append(t_avg)
+                            # 找到了就退出
+                            break
                 # 轮询了所有的region，得到一行记录
-                msg = ''
-                for i in range(5):  # 5个指标
+                msg = '%s,' % ttype
+                for i in range(1, 6):  # 5个指标
                     for region in region_list:
                         record = v[region]
                         try:
@@ -350,16 +379,23 @@ def compute_data_by_site():
                             msg += '-'
                         msg += ','
                 msg = msg.rstrip(',')
-                with open('site0.csv', 'a+') as f:
+                with open(csv_site_sum_file, 'a+') as f:
                     f.write(msg+'\n')
-
 
 
 def compute_data_by_vm():
     """ 虚拟机间比较 """
     csv_file = os.path.join(BASE_DIR, RESULT_DIR, 'vm.csv')
+    csv_vm_sum_file = os.path.join(BASE_DIR, RESULT_DIR, 'vm0.csv')
+    item_list = ['p99', 'p100', 'pavg', 'pdev', 'avg']
     with open(csv_file, 'a') as f:
         f.write('vender,region,vm,flavor,type,p99,p100,pavg,pdev,avg\n')
+    # csv表格存储
+    sum_bw = []
+    sum_qperf = []
+    sum_ping = []
+    sum_memcache = []
+    # 生成明细文档
     for vender in TYPE_LIST.keys():
         # 每个flavor单独比较
         for flavor in TYPE_LIST[vender]['flavor']:
@@ -385,34 +421,119 @@ def compute_data_by_vm():
                     if bw_data:
                         avg,p99,p100,pdev,pavg = compute_percent_and_avg(bw_data)
                         msg = msg_format.format(vender, region, vm, flavor, 'tcp-bw', p99, p100, pavg, pdev, int(avg))
+                        ele = [vender, region, vm, flavor, 'tcp-bw', p99, p100, pavg, pdev, int(avg)]
+                        sum_bw.append(ele)
                         with open(csv_file, 'a') as f:
                             f.write(msg+'\n')
                         print msg
                     if qperf_data:
                         avg,p99,p100,pavg,pdev = compute_percent_and_avg(qperf_data)
-                        msg = msg_format.format(vender, region, vm, flavor, 'qperf', p99, p100, pavg, pdev, round(avg, 1))
+                        msg = msg_format.format(vender, region, vm, flavor, 'qperf-udp', p99, p100, pavg, pdev, round(avg, 1))
+                        ele = [vender, region, vm, flavor, 'qperf-udp', p99, p100, pavg, pdev, round(avg, 1)]
+                        sum_qperf.append(ele)
                         with open(csv_file, 'a') as f:
                             f.write(msg+'\n')
                         print msg
                     if ping_data:
                         avg,p99,p100,pavg,pdev = compute_percent_and_avg(ping_data)
                         msg = msg_format.format(vender, region, vm, flavor, 'ping', p99, p100, pavg, pdev, round(avg, 2))
+                        ele = [vender, region, vm, flavor, 'ping', p99, p100, pavg, pdev, round(avg, 2)]
+                        sum_ping.append(ele)
                         with open(csv_file, 'a') as f:
                             f.write(msg+'\n')
                         print msg
                     if memcache_data:
                         avg,p99,p100,pavg,pdev = compute_percent_and_avg(memcache_data)
                         msg = msg_format.format(vender, region, vm, flavor, 'memcache', p99, p100, pavg, pdev, int(avg))
+                        ele = [vender, region, vm, flavor, 'memcache', p99, p100, pavg, pdev, int(avg)]
+                        sum_memcache.append(ele)
                         with open(csv_file, 'a') as f:
                             f.write(msg+'\n')
                         print msg
+    # 整理成报表格式
+    type_list = ['tcp-bw', 'qperf-udp', 'ping', 'memcache']
+    # 开始匹配
+    for vender in TYPE_LIST.keys():
+        flavor_list = TYPE_LIST[vender]['flavor']
+        region_list = TYPE_LIST[vender]['region']
+        vm_list = TYPE_LIST[vender]['vm']
+        # 每个region单独比较
+        for flavor in flavor_list:
+            for region in region_list:
+                msg = '===================== flavor %s on %s' % (flavor, region)
+                print msg
+                # flavor表头
+                csv_sum_header = []
+                csv_sum_header.append('%s-%s' % (flavor,region))
+                for item in item_list:
+                    for vm in vm_list:
+                        csv_sum_header.append('%s-%s' % (item, vm))
+                format_header = ','.join(csv_sum_header)
+                # 写入文件
+                with open(csv_vm_sum_file, 'a') as f:
+                    f.write('\n' + format_header + '\n')
+                for ttype in type_list:
+                    v = dict()
+                    for vm in vm_list:
+                        v[vm] = []
+                        v[vm].append(ttype)
+                        # 类型判断
+                        sum_list = []
+                        if ttype == 'tcp-bw':
+                            sum_list = sum_bw
+                        elif ttype == 'qperf-udp':
+                            sum_list = sum_qperf
+                        elif ttype == 'ping':
+                            sum_list = sum_ping
+                        elif ttype == 'memcache':
+                            sum_list = sum_memcache
+                        for record in sum_list:
+                            t_vender = record[0]
+                            t_region = record[1]
+                            t_vm = record[2]
+                            t_flavor = record[3]
+                            t_type = record[4]
+                            t_p99 = record[5]
+                            t_p100 = record[6]
+                            t_pavg = record[7]
+                            t_pdev = record[8]
+                            t_avg = record[9]
+                            if t_vender == vender and t_region == region and t_vm == vm and t_flavor == flavor and t_type == ttype:
+                                v[vm].append(str(t_p99)+'%')
+                                v[vm].append(str(t_p100)+'%')
+                                v[vm].append(str(t_pavg)+'%')
+                                v[vm].append(t_pdev)
+                                v[vm].append(t_avg)
+                                # 找到了就退出
+                                break
+                    # 轮询了所有的vm，得到一行记录
+                    msg = '%s,' % ttype
+                    for i in range(1, 6):  # 5个指标
+                        for vm in vm_list:
+                            record = v[vm]
+                            try:
+                                msg += str(record[i])
+                            except Exception as e:
+                                msg += '-'
+                            msg += ','
+                    msg = msg.rstrip(',')
+                    with open(csv_vm_sum_file, 'a+') as f:
+                        f.write(msg + '\n')
 
 
 def compute_data_by_time():
     """ 时间维度比较 """
     csv_file = os.path.join(BASE_DIR, RESULT_DIR, 'time.csv')
+    csv_vm_sum_file = os.path.join(BASE_DIR, RESULT_DIR, 'time0.csv')
+    item_list = ['p99', 'p100', 'pavg', 'pdev', 'avg']
     with open(csv_file, 'a') as f:
         f.write('vender,region,time,flavor,type,p99,p100,pavg,pdev,avg\n')
+    # csv表格存储
+    sum_bw = []
+    sum_qperf = []
+    sum_ping = []
+    sum_memcache = []
+    # 生成明细文档
     for vender in TYPE_LIST.keys():
         # 每个flavor单独比较
         for flavor in TYPE_LIST[vender]['flavor']:
@@ -438,27 +559,104 @@ def compute_data_by_time():
                     if bw_data:
                         avg,p99,p100,pavg,pdev = compute_percent_and_avg(bw_data)
                         msg = msg_format.format(vender, region, str_time, flavor, 'tcp-bw', p99, p100, pavg, pdev, int(avg))
+                        ele = vender, region, str_time, flavor, 'tcp-bw', p99, p100, pavg, pdev, int(avg)
+                        sum_bw.append(ele)
                         with open(csv_file, 'a') as f:
                             f.write(msg+'\n')
                         print msg
                     if qperf_data:
                         avg,p99,p100,pavg,pdev = compute_percent_and_avg(qperf_data)
-                        msg = msg_format.format(vender, region, str_time, flavor, 'qperf', p99, p100, pavg, pdev, round(avg, 1))
+                        msg = msg_format.format(vender, region, str_time, flavor, 'qperf-udp', p99, p100, pavg, pdev, round(avg, 1))
+                        ele = vender, region, str_time, flavor, 'qperf-udp', p99, p100, pavg, pdev, round(avg, 1)
+                        sum_qperf.append(ele)
                         with open(csv_file, 'a') as f:
                             f.write(msg+'\n')
                         print msg
                     if ping_data:
                         avg,p99,p100,pavg,pdev = compute_percent_and_avg(ping_data)
                         msg = msg_format.format(vender, region, str_time, flavor, 'ping', p99, p100, pavg, pdev, round(avg, 2))
+                        ele = vender, region, str_time, flavor, 'ping', p99, p100, pavg, pdev, round(avg, 2)
+                        sum_ping.append(ele)
                         with open(csv_file, 'a') as f:
                             f.write(msg+'\n')
                         print msg
                     if memcache_data:
                         avg,p99,p100,pavg,pdev = compute_percent_and_avg(memcache_data)
                         msg = msg_format.format(vender, region, str_time, flavor, 'memcache', p99, p100, pavg, pdev, int(avg))
+                        ele = vender, region, str_time, flavor, 'memcache', p99, p100, pavg, pdev, int(avg)
+                        sum_memcache.append(ele)
                         with open(csv_file, 'a') as f:
                             f.write(msg+'\n')
                         print msg
+    # 整理成报表格式
+    type_list = ['tcp-bw', 'qperf-udp', 'ping', 'memcache']
+    # 开始匹配
+    for vender in TYPE_LIST.keys():
+        flavor_list = TYPE_LIST[vender]['flavor']
+        region_list = TYPE_LIST[vender]['region']
+        time_list = TYPE_LIST[vender]['time']
+        # 每个region单独比较
+        for flavor in flavor_list:
+            for region in region_list:
+                msg = '===================== flavor %s on %s' % (flavor, region)
+                print msg
+                # flavor表头
+                csv_sum_header = []
+                csv_sum_header.append('%s-%s' % (flavor,region))
+                for item in item_list:
+                    for ttime in time_list:
+                        csv_sum_header.append('%s-%s' % (item, ttime))
+                format_header = ','.join(csv_sum_header)
+                # 写入文件
+                with open(csv_vm_sum_file, 'a') as f:
+                    f.write('\n' + format_header + '\n')
+                for ttype in type_list:
+                    v = dict()
+                    for ttime in time_list:
+                        v[ttime] = []
+                        v[ttime].append(ttype)
+                        # 类型判断
+                        sum_list = []
+                        if ttype == 'tcp-bw':
+                            sum_list = sum_bw
+                        elif ttype == 'qperf-udp':
+                            sum_list = sum_qperf
+                        elif ttype == 'ping':
+                            sum_list = sum_ping
+                        elif ttype == 'memcache':
+                            sum_list = sum_memcache
+                        for record in sum_list:
+                            t_vender = record[0]
+                            t_region = record[1]
+                            t_time = record[2]
+                            t_flavor = record[3]
+                            t_type = record[4]
+                            t_p99 = record[5]
+                            t_p100 = record[6]
+                            t_pavg = record[7]
+                            t_pdev = record[8]
+                            t_avg = record[9]
+                            if t_vender == vender and t_region == region and t_time == ttime and t_flavor == flavor and t_type == ttype:
+                                v[ttime].append(str(t_p99)+'%')
+                                v[ttime].append(str(t_p100)+'%')
+                                v[ttime].append(str(t_pavg)+'%')
+                                v[ttime].append(t_pdev)
+                                v[ttime].append(t_avg)
+                                # 找到了就退出
+                                break
+                    # 轮询了所有的vm，得到一行记录
+                    msg = '%s,' % ttype
+                    for i in range(1, 6):  # 5个指标
+                        for ttime in time_list:
+                            record = v[ttime]
+                            try:
+                                msg += str(record[i])
+                            except Exception as e:
+                                msg += '-'
+                            msg += ','
+                    msg = msg.rstrip(',')
+                    with open(csv_vm_sum_file, 'a+') as f:
+                        f.write(msg + '\n')
 
 
 def main():
@@ -475,4 +673,3 @@ if __name__ == '__main__':
 
 
 print '>>>%s finish' % os.path.basename(__file__)
-
