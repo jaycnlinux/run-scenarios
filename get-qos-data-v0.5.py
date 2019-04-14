@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-#!/usr/bin/python
+# !/usr/bin/python
 # __author__ = 'chengxiang'
 # date: 20190408
 
