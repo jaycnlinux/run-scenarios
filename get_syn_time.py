@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
-# author：caoguozhi
+# author：chengxiang
 # date: 2018-10-15
 # version: v0.2
 # 程序功能：输入tcpdump抓下来的pcap报文，分析SYN到SYN_ACK之间的时间差别，用于分析TCP新建首个报文花费时间。
