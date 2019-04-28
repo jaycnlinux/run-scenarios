@@ -1,0 +1,225 @@
+#! /bin/bash
+### BEGIN INIT INFO
+# Provides:          multi-queue-hw
+# Required-Start:    $local_fs $network
+# Required-Stop:     $remote_fs
+# X-Start-Before:    sshd
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: NIC multiple queues init
+# Description:       NIC multiple queues initialization
+### END INIT INFO
+
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+DESC="NIC multiple queues configure service"
+NAME=multi-queue-hw
+SCRIPTNAME=/etc/init.d/$NAME
+
+total_queues=0
+log_file="/var/log/multi-queue-hw.log"
+rfs_entry_file="/proc/sys/net/core/rps_sock_flow_entries"
+
+function get_eth_info()
+{
+    ethdirs=$(ls -d /sys/class/net/eth*)
+    if [ $? -ne 0 ];then
+        echo "Error: Failed to find eth* , sleep 30" >> $log_file
+        sleep 30
+        ethdirs=$(ls -d /sys/class/net/eth*)
+        if [ $? -ne 0 ];then
+	    echo "Error: failed to find eth* again" >> $log_file
+	fi
+    fi
+
+    echo $ethdirs
+}
+
+function cal_cpuset()
+{
+    cpu_num=$(grep -c processor /proc/cpuinfo)
+    quotient=$((cpu_num/4))
+    if [ $quotient -lt 1 ]; then
+        quotient=1
+    fi
+    for i in $(seq $quotient)
+    do
+        if [ $(($i % 8)) -eq 1 -a $i -gt 8 ]; then
+            cpuset="f,${cpuset}"
+        else
+            cpuset="f${cpuset}"
+        fi
+    done
+    if [ $cpu_num -lt 4 ]; then
+        for i in $(seq $cpu_num)
+        do
+            bin_mask="${bin_mask}1"
+        done
+        ((cpuset=2#${bin_mask}))
+    fi
+    echo $cpuset
+}
+
+function set_rps_xps()
+{
+    eth_dir=$1
+    cpu_set=$2
+    
+    cur_eth=$(basename $eth_dir)
+    cur_q_num=$(ethtool -l $cur_eth | grep -iA5 current | grep -i combined | awk {'print $2'})
+    for((i=0;i<cur_q_num;i++))
+    do
+        xps_file="/sys/class/net/${cur_eth}/queues/tx-$i/xps_cpus"
+        rps_file="/sys/class/net/${cur_eth}/queues/rx-$i/rps_cpus"
+        echo $cpu_set > $xps_file
+	echo "Info: $cur_eth set $cpu_set to $xps_file" >> $log_file
+        echo $cpu_set > $rps_file
+	echo "Info: $cur_eth set $cpu_set to $rps_file"  >> $log_file
+    done
+}
+
+function set_rfs_cnt()
+{
+    eth_dir=$1
+    rps_flow_cnt_num=4096
+
+    eth=$(basename $eth_dir)
+    queues=$(ls -ld /sys/class/net/$eth/queues/rx-* | wc -l)
+    total_queues=$(($total_queues + $queues))
+    
+    for q in $(ls /sys/class/net/$eth/queues/rx-*/rps_flow_cnt)
+    do
+        echo $rps_flow_cnt_num > $q
+        if [ "X$rps_flow_cnt_num" != "X$(cat $q)" ]; then
+            echo "Error:failed to set $rps_flow_cnt_num to $q" >> $log_file
+        else
+            echo "Info: $eth set $rps_flow_cnt_num to $q" >> $log_file
+        fi
+    done
+}
+
+function set_rfs_entry()
+{
+    rps_flow_cnt_num=4096
+    echo "Info: total queue num is $total_queues" >> $log_file
+
+    if [ $total_queues -eq 0 ]; then
+        total_queues=1
+    fi
+    total_flow_entries=$(($rps_flow_cnt_num * $total_queues))
+    echo "Info: total flow entries is $total_flow_entries" >> $log_file
+    echo $total_flow_entries > $rfs_entry_file
+    cur_flow_entries=$(cat $rfs_entry_file)
+    echo "Info: current flow entries is $cur_flow_entries" >> $log_file
+}
+
+function set_multi_queue()       
+{
+    eth=$(basename $1)
+    max_queue=$(ethtool -l $eth | grep 'Combined' | sed -n '1p' | awk '{print $2}')
+    cur_queue=$(ethtool -l $eth | grep 'Combined' | sed -n '2p' | awk '{print $2}')
+    echo "Info: $eth maximum combined is ${max_queue}, current combined is $cur_queue" >> $log_file
+    if [ $cur_queue -ne $max_queue ];  then
+        ethtool -L $eth combined $max_queue
+        if [ $? -ne 0 ];then
+            echo "Error:set $eth combined queues to $max_queue failure" >> $log_file
+	else
+    	    cur_queue=$(ethtool -l $eth | grep 'Combined' | sed -n '2p' | awk '{print $2}')
+            echo "Info: $eth current combined is ${cur_queue}" >> $log_file
+        fi
+    fi
+
+}
+
+function start_irqbalance()
+{
+    cpu_num=$(grep -c processor /proc/cpuinfo)
+    if [ $cpu_num -lt 2 ]; then
+        echo "Info: $cpu_num cpu no need to start irqbalance" >> $log_file
+        return
+    fi
+    if [ $(ps -ef | grep irqbalance | grep -v grep | wc -l) -eq 0 ]; then
+        systemctl start irqbalance  > /dev/null 2>&1
+        sleep 1
+        systemctl status irqbalance &> /dev/null
+        if [ $? -ne 0 ]; then
+            service irqbalance start
+            if [ $? -ne 0 ]; then 
+                echo "Error:failed to start irqbalance" >> $log_file
+            else
+	        echo "Info: irqbalance started" >> $log_file
+            fi
+        else
+            echo "Info: irqbalance started." >> $log_file
+        fi
+    else
+        echo "Info: irqbalance is running, no need to start it." >> $log_file
+    fi
+}
+
+function multi-queue-hw()
+{
+    echo "Info: start multi queue config at `date`" > $log_file
+    eth_dir=`get_eth_info`
+    cpu_sets=$(cal_cpuset)
+    irq_bind=0
+
+    for eth in $eth_dir
+    do
+        set_multi_queue $eth
+	set_rps_xps $eth $cpu_sets
+	set_rfs_cnt $eth
+    done
+    set_rfs_entry $total_queues
+    start_irqbalance
+	
+    if [ $? -eq 0 ];then
+        echo $"Starting $NAME: OK"
+    else
+        echo $"Starting $NAME: Failed"
+    fi
+    echo "Info: multi queue config finished at `date`" >> $log_file
+}
+
+# Read configuration variable file if it is present
+[ -r /etc/default/$NAME ] && . /etc/default/$NAME
+function start() {
+    multi-queue-hw
+    RETVAL=$?
+    return $RETVAL
+}
+
+function stop() {
+    echo -n $"Stopping $NAME "
+    #No-op
+    RETVAL=7
+    return $RETVAL
+}
+
+case "$1" in
+    start)
+        start
+        RETVAL=$?
+        ;;
+    stop)
+        stop
+        RETVAL=$?
+        ;;
+    restart|try-restart|condrestart)
+        start
+        RETVAL=$?
+        ;;
+    reload|force-reload)
+        #It does not support reload|force-reload
+        RETVAL=3
+        ;;
+    status)
+        echo -n $"Checking for service $NAME:"
+        RETVAL=3
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|status|try-restart|condrestart|restart|force-reload|reload}"
+        RETVAL=3
+        ;;
+esac
+
+exit $RETVAL
