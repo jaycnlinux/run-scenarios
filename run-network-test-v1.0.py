@@ -379,7 +379,7 @@ class Public(object):
                     }}
                 }}
                 '
-            """.format(host=host, password="Pa123456!")
+            """.format(host=host, password=password)
             # 注意，在原始字符串"""用format方法的时候，里面的{}被认为是符号变量，因此要用双重括号{{   }}去掉转义
             p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             (output, error) = p.communicate()
