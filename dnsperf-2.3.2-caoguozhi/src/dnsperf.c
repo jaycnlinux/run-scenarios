@@ -275,7 +275,9 @@ print_statistics(const config_t* config, const times_t* times, stats_t* stats,
     bool         first_rcode;
     uint64_t     latency_avg;
     unsigned int i, j;
-    uint64_t pos=0;
+    uint64_t pos = 0;
+    uint64_t t_pos = 0;
+    int t_id = 0;
     threadinfo_t * tinfo = NULL;
 
     units = config->updates ? "Updates" : "Queries";
@@ -347,12 +349,14 @@ print_statistics(const config_t* config, const times_t* times, stats_t* stats,
 
     for(j=0; j < config->threads; j++)
     {
+        t_id++;
         tinfo = &p_threads[j];
 		// printf("thread address=%u\n", tinfo);
         // printf("latency_num=%d\n", tinfo->latency_num);
         for (pos=0; pos < tinfo->latency_num; pos++)
         {
-            printf("pos=%u, latency=%u us\n", pos, tinfo->latency_detail[pos]);
+            t_pos++;
+            printf("thread=%d, pos=%u, latency=%u us\n", t_id, t_pos, tinfo->latency_detail[pos]);
         }
     }
     
