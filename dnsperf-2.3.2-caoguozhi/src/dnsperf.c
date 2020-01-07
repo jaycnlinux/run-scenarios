@@ -84,7 +84,7 @@
 
 #define RECV_BATCH_SIZE 16
 
-#define MAX_DETAIL_NUM 100000000    // 最多存储1亿个数据
+#define MAX_DETAIL_NUM 10000000    // 最多存储1千万条数据
 
 typedef struct {
     int                   argc;
@@ -132,6 +132,13 @@ typedef struct {
     uint64_t latency_sum_squares;
     uint64_t latency_min;
     uint64_t latency_max;
+    float *p_data;       // 装载有效数据
+    uint64_t data_num;   // 真实的数据长度
+    float avg_time;      // 平均时延,单位:ms
+    float min_time;      // 最小时延,单位:ms
+    float max_time;      // 最大时延,单位:ms
+    float p95_time;      // P95时延,单位:ms
+    float p99_time;      // P99时延,单位:ms
 } stats_t;
 
 typedef ISC_LIST(struct query_info) query_list;
@@ -266,6 +273,64 @@ stddev(uint64_t sum_of_squares, uint64_t sum, uint64_t total)
     return sqrt((sum_of_squares - (squared / total)) / (total - 1));
 }
 
+
+void swap(float *a, float *b)    
+{  
+    float temp;  
+
+    temp = *a;  
+    *a = *b;  
+    *b = temp;  
+}  
+
+
+void quicksort(float array[], uint64_t maxlen, uint64_t begin, uint64_t end)  
+{  
+    uint64_t i, j;  
+  
+    if(begin < end)  
+    {  
+        i = begin + 1;
+        j = end;
+            
+        while(i < j)  
+        {  
+            if(array[i] > array[begin])
+            {  
+                swap(&array[i], &array[j]);
+                j--;  
+            }  
+            else  
+            {  
+                i++;  
+            }  
+        }  
+  
+ 
+        if(array[i] >= array[begin]) 
+        {  
+            i--;  
+        }  
+  
+        swap(&array[begin], &array[i]);
+          
+        quicksort(array, maxlen, begin, i);  
+        quicksort(array, maxlen, j, end);  
+    }  
+}  
+
+
+void show_data_detail(float *p)
+{
+    uint64_t sum_pos = 0;
+    while(p[sum_pos] != 0)
+    {
+        printf("No.%u data=%.3f\n", sum_pos+1, p[sum_pos]);
+        sum_pos++;
+    }
+}
+
+
 static void
 print_statistics(const config_t* config, const times_t* times, stats_t* stats, 
 	             const threadinfo_t* p_threads)
@@ -275,17 +340,16 @@ print_statistics(const config_t* config, const times_t* times, stats_t* stats,
     bool         first_rcode;
     uint64_t     latency_avg;
     unsigned int i, j;
-    uint64_t pos = 0;
     uint64_t t_pos = 0;
-    int t_id = 0;
+    uint64_t sum_pos = 0;
     threadinfo_t * tinfo = NULL;
+    float sum_time = 0.f;
+    float temp = 0.0f;
 
     units = config->updates ? "Updates" : "Queries";
-
     run_time = times->end_time - times->start_time;
 
     printf("Statistics:\n\n");
-
     printf("  %s sent:         %" PRIu64 "\n",
         units, stats->num_sent);
     printf("  %s completed:    %" PRIu64 " (%.2lf%%)\n",
@@ -338,28 +402,93 @@ print_statistics(const config_t* config, const times_t* times, stats_t* stats,
     if (stats->num_completed > 1) {
         printf("  Latency StdDev (s):   %f\n",
             stddev(stats->latency_sum_squares, stats->latency_sum,
-                stats->num_completed)
-                / MILLION);
+                   stats->num_completed)
+            / MILLION);
     }
 
 	// 打印每个线程延迟
-    printf("  Latency details(thread=%d):\n", config->threads);
+    printf("  Latency thread=%d calucating begin ...\n", config->threads);
 	if (p_threads == NULL)
+    {
+        printf("ERROR: no threads find\n");
 		return;
+    }
 
+    // 统计数字初始化
+    stats->p_data = NULL;
+    stats->data_num = 0;
+    stats->avg_time = 0.0f;
+    stats->min_time = 0.0f;
+    stats->max_time = 0.0f;
+    stats->p95_time = 0.0f;
+    stats->p99_time = 0.0f;
+    
+    // 统计有效数据个数
+    for(j=0; j<config->threads;j++)
+    {
+        tinfo = &p_threads[j];
+        stats->data_num += tinfo->latency_num;
+    }
+
+    // 分配内存
+    stats->p_data = (float *)malloc(stats->data_num * sizeof(float) + 1);
+    if (stats->p_data == NULL)
+    {
+        printf("ERROR: malloc memory failed\n");
+        return;
+    }
+    memset(stats->p_data, 0, stats->data_num * sizeof(float) + 1);
+
+    // 数据拷贝
+    sum_pos = 0;
     for(j=0; j < config->threads; j++)
     {
-        t_id++;
         tinfo = &p_threads[j];
-		// printf("thread address=%u\n", tinfo);
-        // printf("latency_num=%d\n", tinfo->latency_num);
-        for (pos=0; pos < tinfo->latency_num; pos++)
+        for (t_pos=0; t_pos < tinfo->latency_num; t_pos++)
         {
-            t_pos++;
-            printf("thread=%d, pos=%u, latency=%u us\n", t_id, t_pos, tinfo->latency_detail[pos]);
+            stats->p_data[sum_pos] = (float)tinfo->latency_detail[t_pos] / 1000;
+            sum_pos++;
         }
     }
-    
+
+    // debug输出每个数据明细
+    // show_data_detail(stats->p_data);
+
+    // 快速排序,效率最高
+    quicksort(stats->p_data, stats->data_num, 0, stats->data_num-1);
+
+    // 最小最大
+    stats->min_time = stats->p_data[0];
+    stats->max_time = stats->p_data[stats->data_num-1];
+
+    // 平均
+    sum_time = 0.0f;
+    for(i=0; i<stats->data_num; i++)
+        sum_time += stats->p_data[i];
+    stats->avg_time = sum_time / stats->data_num;
+
+    // P95
+    t_pos = stats->data_num*95/100;
+    stats->p95_time = stats->p_data[t_pos];
+
+    // P99
+    t_pos = stats->data_num*99/100;
+    stats->p99_time = stats->p_data[t_pos];
+
+    // 打印统计
+    printf("\n");
+    printf("  Latency avg    %.3f (ms)\n", stats->avg_time);
+    printf("  Latency min    %.3f (ms)\n", stats->min_time);
+    printf("  Latency p95    %.3f (ms)\n", stats->p95_time);
+    printf("  Latency p99    %.3f (ms)\n", stats->p99_time);
+    printf("  Latency max    %.3f (ms)\n", stats->max_time);
+
+    // 释放有效数据内存
+    if(stats->p_data != NULL)
+    {
+        free(stats->p_data);
+        stats->p_data = NULL;
+    }
     printf("\n");
 }
 
@@ -1194,11 +1323,14 @@ int main(int argc, char** argv)
     isc_result_t           result;
     struct perf_net_socket sock = {.mode = sock_pipe };
 	static threadinfo_t* p_threads = NULL;	// 保存测试线程地址
+    uint64_t *p_data = NULL; // 保存多个线程的结果
 
-    printf("DNS Performance Testing Tool\n"
-           "*** Modified by caoguozhi ***\n"
-           "Date 2020-01-05\n"
-           "Version " PACKAGE_VERSION "\n\n");
+    printf("--------------------------------\n"
+           "| DNS Performance Testing Tool |\n"
+           "| Modified by caoguozhi        |\n"
+           "| Date 2020-01-06              |\n"
+           "| Version 2.3.2a               |\n"
+           "--------------------------------\n\n");
 
     (void)SSL_library_init();
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
@@ -1231,7 +1363,8 @@ int main(int argc, char** argv)
     if (config.stats_interval > 0) {
         stats_thread.config = &config;
         stats_thread.times  = &times;
-        THREAD(&stats_thread.sender, do_interval_stats, &stats_thread); // 创建阶段统计线程,do_interval_stats是函数，stats_thread是参数
+        // 创建阶段统计线程,do_interval_stats是函数，stats_thread是参数
+        THREAD(&stats_thread.sender, do_interval_stats, &stats_thread);
     }
 
     times.start_time = get_time();
@@ -1244,7 +1377,7 @@ int main(int argc, char** argv)
 
     LOCK(&start_lock);
     started = true;
-    BROADCAST(&start_cond); // 打开开始标记
+    BROADCAST(&start_cond);
     UNLOCK(&start_lock);
 
     perf_os_handlesignal(SIGINT, handle_sigint);
